@@ -1,0 +1,74 @@
+version: "3.9"
+
+services:
+  desktop:
+    build:
+      context: ./container
+      dockerfile: Dockerfile
+    container_name: collabsmart-desktop
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+      - DISPLAY=:1
+    volumes:
+      - workspace:/workspace
+      - ./container/configs:/configs:ro
+    ports:
+      - "6080:6080"
+    networks:
+      - collabsmart
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6080"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: collabsmart-backend
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - DESKTOP_HOST=desktop
+      - DESKTOP_VNC_PORT=5901
+      - WORKSPACE_PATH=/workspace
+    volumes:
+      - workspace:/workspace
+    ports:
+      - "3001:3001"
+    networks:
+      - collabsmart
+    depends_on:
+      desktop:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: collabsmart-frontend
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_BACKEND_URL=http://localhost:3001
+      - NEXT_PUBLIC_NOVNC_URL=http://localhost:6080
+    ports:
+      - "3000:3000"
+    networks:
+      - collabsmart
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  workspace:
+    driver: local
+
+networks:
+  collabsmart:
+    driver: bridge
