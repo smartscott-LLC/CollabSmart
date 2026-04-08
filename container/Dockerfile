@@ -44,10 +44,8 @@ RUN chmod +x /home/${USER}/.vnc/xstartup && \
 
 # Workspace setup
 RUN mkdir -p /workspace && \
-    chown -R ${USER}:${USER} /workspace && \
-    chmod 775 /workspace && \
-    # Give ai-agent read/write to workspace
-    chown -R ${USER}:${AI_USER} /workspace
+    chown -R ${USER}:${AI_USER} /workspace && \
+    chmod 775 /workspace
 
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
