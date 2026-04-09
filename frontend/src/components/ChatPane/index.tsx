@@ -28,7 +28,7 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
       >
         {!isUser && (
           <span className="text-sharp-ai text-xs font-semibold block mb-1">
-            ◈ Claude
+            ◈ claude-haiku-4-5-20251001-haiku-4-5-20251001-haiku-4-5-20251001-haiku-4-5-20251001
           </span>
         )}
         {msg.content}
@@ -104,7 +104,7 @@ export default function ChatPane() {
           <div className="flex justify-start mb-3">
             <div className="bg-sharp-surface border border-sharp-border px-4 py-2 rounded-lg rounded-bl-none text-sm">
               <span className="text-sharp-ai text-xs font-semibold block mb-1">
-                ◈ Claude
+                ◈ claude-haiku-4-5-20251001-haiku-4-5-20251001-haiku-4-5-20251001-haiku-4-5-20251001
               </span>
               <span className="text-gray-400 animate-pulse">Thinking...</span>
             </div>
@@ -123,7 +123,7 @@ export default function ChatPane() {
             disabled={status !== 'connected'}
             placeholder={
               status === 'connected'
-                ? 'Message Claude... (Enter to send, Shift+Enter for newline)'
+                ? 'Message claude-haiku-4-5-20251001... (Enter to send, Shift+Enter for newline)'
                 : 'Connecting...'
             }
             rows={2}

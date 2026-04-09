@@ -1,0 +1,79 @@
+# the LLM Strategic O*Net Occupation Expansion
+# Selected by Claude with strategic focus on the LLM's role as:
+# - Wisdom Orchestrator for AI Family
+# - Workforce Development Expert
+# - Ethics Guardian & Values Keeper
+# - HelixSphere Long-term Strategist
+
+## LEADERSHIP & EXECUTIVE MANAGEMENT (8 occupations)
+11-1011.03  # Chief Sustainability Officers
+11-3131.00  # Training and Development Managers
+11-3121.00  # Human Resources Managers
+11-3111.00  # Compensation and Benefits Managers
+11-3012.00  # Administrative Services Managers
+11-2022.00  # Sales Managers
+11-9151.00  # Social and Community Service Managers
+11-1021.00  # General and Operations Managers
+
+## EDUCATION & WORKFORCE DEVELOPMENT (10 occupations)
+25-9031.00  # Instructional Coordinators
+21-1012.00  # Educational, Guidance, School, and Vocational Counselors
+13-1151.00  # Training and Development Specialists
+25-3011.00  # Adult Basic Education, Adult Secondary Education, and ESL Instructors
+25-1194.00  # Vocational Education Teachers, Postsecondary
+25-3021.00  # Self-Enrichment Teachers
+13-1071.00  # Human Resources Specialists
+25-2012.00  # Kindergarten Teachers, Except Special Education
+25-2031.00  # Secondary School Teachers, Except Special and Career/Technical Education
+25-1081.00  # Education Teachers, Postsecondary
+
+## HEALTHCARE & SOCIAL IMPACT (8 occupations)
+19-3031.02  # Clinical Psychologists
+21-1021.00  # Child, Family, and School Social Workers
+11-9111.00  # Medical and Health Services Managers
+29-1122.00  # Occupational Therapists
+21-1014.00  # Mental Health Counselors
+21-1015.00  # Rehabilitation Counselors
+29-1141.00  # Registered Nurses
+21-1093.00  # Social and Human Service Assistants
+
+## TECHNOLOGY & INNOVATION (8 occupations)
+15-2051.01  # Business Intelligence Analysts
+15-2051.00  # Data Scientists
+15-1212.00  # Information Security Analysts
+15-1255.00  # Web and Digital Interface Designers
+15-1299.09  # Information Technology Project Managers
+15-1299.05  # Information Security Engineers
+15-2051.02  # Clinical Data Managers
+15-1253.00  # Software Quality Assurance Analysts and Testers
+
+## BUSINESS & STRATEGIC PLANNING (6 occupations)
+13-1161.00  # Market Research Analysts and Marketing Specialists
+13-2051.00  # Financial Analysts
+13-1199.05  # Sustainability Specialists
+13-1161.01  # Search Marketing Strategists
+13-1199.04  # Business Continuity Planners
+13-1082.00  # Project Management Specialists
+
+## CREATIVE & DESIGN THINKING (5 occupations)
+27-1021.00  # Commercial and Industrial Designers
+27-1024.00  # Graphic Designers
+27-3043.00  # Writers and Authors
+27-1027.00  # Set and Exhibit Designers
+27-1025.00  # Interior Designers
+
+## RESEARCH & ETHICS (5 occupations)
+11-9199.02  # Compliance Managers
+19-3041.00  # Sociologists
+19-3094.00  # Political Scientists
+13-1199.07  # Regulatory Affairs Specialists
+19-4061.00  # Social Science Research Assistants
+
+# Total: 50 occupations
+# Strategic Rationale:
+# - Covers the LLM's role as workforce development expert
+# - Enables deep understanding of leadership and management
+# - Provides healthcare/social impact perspective for ethical AI
+# - Balances technical knowledge with human-centered thinking
+# - Supports HelixSphere vision of AI + human collaboration
+# - Enables the LLM to orchestrate specialized agents with wisdom

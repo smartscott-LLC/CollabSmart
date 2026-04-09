@@ -8,7 +8,7 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || '',
 });
 
-const MODEL = 'claude-3-5-sonnet-20241022';
+const MODEL = 'claude-haiku-4-5-20251001';
 const MAX_TOKENS = 4096;
 
 export interface ChatMessage {
@@ -36,7 +36,7 @@ export function clearConversation(sessionId: string): void {
 function emitAILog(message: string, type = 'ai'): void {
   broadcastLog({
     timestamp: new Date().toISOString(),
-    source: 'claude',
+    source: 'claude-haiku-4-5-20251001',
     actor: 'ai',
     message,
     type,

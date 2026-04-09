@@ -1,0 +1,24 @@
+# Agent Factory Python Dependencies
+# Install with: pip install -r requirements.txt
+
+# PostgreSQL adapter
+psycopg2-binary>=2.9.9
+
+# For async operations (optional, for future enhancements)
+# psycopg[binary,pool]>=3.1.0
+
+# For environment variable management
+python-dotenv>=1.0.0
+
+# For testing (optional)
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+
+# For monitoring/metrics (optional)
+prometheus-client>=0.19.0
+
+# For logging (optional, enhanced logging)
+structlog>=23.2.0
+
+# For data validation (optional)
+pydantic>=2.5.0
