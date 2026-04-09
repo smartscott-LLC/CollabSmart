@@ -1,6 +1,17 @@
 export { ContextAnalyzer } from './contextAnalyzer';
-export type { ContextAnalysis } from './contextAnalyzer';
-export { ShortTermMemory } from './shortTermMemory';
-export type { Interaction, SessionMemory } from './shortTermMemory';
-export { MemoryManager, memoryManager } from './memoryManager';
-export type { EnrichedContext } from './memoryManager';
+export type { ContextAnalysis } from './types';
+export { WorkingMemory } from './workingMemory';
+export { ShortTermMemory, calculateImportanceScore, extractEmotionalMarkers } from './shortTermMemory';
+export { LongTermMemory } from './longTermMemory';
+export { PersonalityLearning } from './personalityLearning';
+export { ModeSelector } from './modeSelector';
+export { OnetIntegration } from './onetIntegration';
+export { MemoryManager } from './memoryManager';
+export type {
+  CollabMode,
+  ScenarioType,
+  StoredMessage,
+  SemanticMemory,
+  UserProfile,
+  EnrichedContext,
+} from './types';
