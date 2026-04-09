@@ -3,6 +3,7 @@ import { Socket } from 'socket.io';
 import logger from '../logger';
 import { TOOL_DEFINITIONS, dispatchTool } from '../tools';
 import { broadcastLog } from '../orchestrator';
+import { memoryManager } from '../memory';
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || '',
@@ -31,6 +32,7 @@ function getOrCreateConversation(sessionId: string): ConversationSession {
 
 export function clearConversation(sessionId: string): void {
   conversations.delete(sessionId);
+  memoryManager.clearSession(sessionId);
 }
 
 function emitAILog(message: string, type = 'ai'): void {
@@ -50,9 +52,12 @@ export async function processChat(
 ): Promise<string> {
   const conversation = getOrCreateConversation(sessionId);
 
+  // Analyze message context and retrieve relevant memory
+  const enrichedContext = memoryManager.analyzeAndRetrieve(sessionId, userMessage);
+
   conversation.history.push({ role: 'user', content: userMessage });
 
-  const systemPrompt = `You are an AI pair programmer working inside a shared containerized Linux environment (CollabSmart). 
+  const coreSystemPrompt = `You are an AI pair programmer working inside a shared containerized Linux environment (CollabSmart). 
 You have access to a live workspace directory where both you and the user can read and write files, run commands, and observe processes.
 
 You have the following tools available:
@@ -69,6 +74,10 @@ Guidelines:
 - Report errors clearly and suggest fixes
 - Keep the user in control - they can stop you at any time
 - All your actions are visible to the user in real-time`;
+
+  const systemPrompt = enrichedContext.systemPromptAddition
+    ? `${coreSystemPrompt}\n\n${enrichedContext.systemPromptAddition}`
+    : coreSystemPrompt;
 
   let messages: Anthropic.MessageParam[] = conversation.history.map((m) => ({
     role: m.role,
@@ -142,6 +151,14 @@ Guidelines:
 
     conversation.history.push({ role: 'assistant', content: finalResponse });
     emitAILog(finalResponse, 'response');
+
+    // Store completed interaction in memory for future context
+    memoryManager.storeInteraction(
+      sessionId,
+      userMessage,
+      finalResponse,
+      enrichedContext.analysis,
+    );
 
     return finalResponse;
   } catch (err: unknown) {
