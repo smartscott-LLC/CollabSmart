@@ -1,4 +1,43 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: collabsmart-postgres
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-collabsmart}
+      - POSTGRES_USER=${POSTGRES_USER:-collabsmart}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-collabsmart}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - collabsmart
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-collabsmart} -d ${POSTGRES_DB:-collabsmart}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  dragonfly:
+    image: docker.dragonflydb.io/dragonflydb/dragonfly:latest
+    container_name: collabsmart-dragonfly
+    command: --logtostderr
+    ulimits:
+      memlock: -1
+    volumes:
+      - dragonfly_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - collabsmart
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   desktop:
     build:
       context: ./container
@@ -35,6 +74,16 @@ services:
       - DESKTOP_HOST=desktop
       - DESKTOP_VNC_PORT=5901
       - WORKSPACE_PATH=/workspace
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=${POSTGRES_DB:-collabsmart}
+      - POSTGRES_USER=${POSTGRES_USER:-collabsmart}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-collabsmart}
+      - DRAGONFLY_HOST=dragonfly
+      - DRAGONFLY_PORT=6379
+      - ONET_API_BASE=${ONET_API_BASE:-https://services.onetcenter.org/ws}
+      - ONET_USERNAME=${ONET_USERNAME:-}
+      - ONET_PASSWORD=${ONET_PASSWORD:-}
     volumes:
       - workspace:/workspace
     ports:
@@ -43,6 +92,10 @@ services:
       - collabsmart
     depends_on:
       desktop:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      dragonfly:
         condition: service_healthy
     restart: unless-stopped
 
@@ -65,6 +118,10 @@ services:
 
 volumes:
   workspace:
+    driver: local
+  postgres_data:
+    driver: local
+  dragonfly_data:
     driver: local
 
 networks:
