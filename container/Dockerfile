@@ -31,10 +31,8 @@ RUN apt-get update && apt-get install -y \
 COPY user-setup.sh /user-setup.sh
 RUN chmod +x /user-setup.sh && /user-setup.sh
 
-# Configure VNC
+# Configure VNC directory (password is set at runtime via entrypoint.sh using VNC_PASSWORD env var)
 RUN mkdir -p /home/${USER}/.vnc && \
-    echo "password" | vncpasswd -f > /home/${USER}/.vnc/passwd && \
-    chmod 600 /home/${USER}/.vnc/passwd && \
     chown -R ${USER}:${USER} /home/${USER}/.vnc
 
 # VNC xstartup

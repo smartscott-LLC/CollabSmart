@@ -8,13 +8,19 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-collabsmart}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./backend/db/schema.sql:/docker-entrypoint-initdb.d/00-schema.sql:ro
     ports:
       - "5432:5432"
     networks:
       - collabsmart
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-collabsmart} -d ${POSTGRES_DB:-collabsmart}"]
+      test:
+        - "CMD-SHELL"
+        - >
+          PGPASSWORD=${POSTGRES_PASSWORD:-collabsmart}
+          psql -U ${POSTGRES_USER:-collabsmart} -d ${POSTGRES_DB:-collabsmart}
+          -c 'SELECT 1' -q --no-psqlrc > /dev/null 2>&1
       interval: 10s
       timeout: 5s
       retries: 5
@@ -22,7 +28,9 @@ services:
   dragonfly:
     image: docker.dragonflydb.io/dragonflydb/dragonfly:latest
     container_name: collabsmart-dragonfly
-    command: --logtostderr
+    command: dragonfly --logtostderr --requirepass ${DRAGONFLY_PASSWORD:-dragonfly_secret} --maxmemory ${DRAGONFLY_MAX_MEMORY:-512mb}
+    environment:
+      - DRAGONFLY_PASSWORD=${DRAGONFLY_PASSWORD:-dragonfly_secret}
     ulimits:
       memlock: -1
     volumes:
@@ -33,7 +41,10 @@ services:
       - collabsmart
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test:
+        - "CMD-SHELL"
+        - >
+          redis-cli --no-auth-warning -a "$DRAGONFLY_PASSWORD" ping | grep -q PONG
       interval: 10s
       timeout: 5s
       retries: 5
@@ -48,6 +59,7 @@ services:
       - PGID=1000
       - TZ=UTC
       - DISPLAY=:1
+      - VNC_PASSWORD=${VNC_PASSWORD:-collabsmart_vnc}
     volumes:
       - workspace:/workspace
       - ./container/configs:/configs:ro
@@ -71,6 +83,7 @@ services:
       - NODE_ENV=production
       - PORT=3001
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
       - DESKTOP_HOST=desktop
       - DESKTOP_VNC_PORT=5901
       - WORKSPACE_PATH=/workspace
@@ -81,9 +94,19 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-collabsmart}
       - DRAGONFLY_HOST=dragonfly
       - DRAGONFLY_PORT=6379
+      - DRAGONFLY_PASSWORD=${DRAGONFLY_PASSWORD:-dragonfly_secret}
+      - DRAGONFLY_DB=${DRAGONFLY_DB:-0}
+      - AI_MODEL=${AI_MODEL:-claude-haiku-4-5-20251001}
+      - AI_MAX_TOKENS=${AI_MAX_TOKENS:-4096}
       - ONET_API_BASE=${ONET_API_BASE:-https://services.onetcenter.org/ws}
       - ONET_USERNAME=${ONET_USERNAME:-}
       - ONET_PASSWORD=${ONET_PASSWORD:-}
+      - MEMORY_PROMOTION_THRESHOLD=${MEMORY_PROMOTION_THRESHOLD:-5.0}
+      - WORKING_MEMORY_TTL_HOURS=${WORKING_MEMORY_TTL_HOURS:-48}
+      - SESSION_RECORDING_ENABLED=${SESSION_RECORDING_ENABLED:-false}
+      - SESSION_TIMEOUT_MINUTES=${SESSION_TIMEOUT_MINUTES:-30}
+      - MAX_CONVERSATION_HISTORY=${MAX_CONVERSATION_HISTORY:-100}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
     volumes:
       - workspace:/workspace
     ports:
@@ -106,8 +129,8 @@ services:
     container_name: collabsmart-frontend
     environment:
       - NODE_ENV=production
-      - NEXT_PUBLIC_BACKEND_URL=http://localhost:3001
-      - NEXT_PUBLIC_NOVNC_URL=http://localhost:6080
+      - NEXT_PUBLIC_BACKEND_URL=${NEXT_PUBLIC_BACKEND_URL:-http://localhost:3001}
+      - NEXT_PUBLIC_NOVNC_URL=${NEXT_PUBLIC_NOVNC_URL:-http://localhost:6080}
     ports:
       - "3000:3000"
     networks:

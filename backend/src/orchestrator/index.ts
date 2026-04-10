@@ -9,9 +9,14 @@ export interface Session {
   lastActivity: Date;
 }
 
+export type OnSessionEndCallback = (sessionId: string, startedAt: Date) => void | Promise<void>;
+
 const sessions = new Map<string, Session>();
 
-export function initOrchestrator(io: SocketIOServer): void {
+export function initOrchestrator(
+  io: SocketIOServer,
+  onSessionEnd?: OnSessionEndCallback,
+): void {
   io.on('connection', (socket: Socket) => {
     const sessionId = uuidv4();
     const session: Session = {
@@ -26,8 +31,17 @@ export function initOrchestrator(io: SocketIOServer): void {
     socket.emit('session:init', { sessionId });
 
     socket.on('disconnect', () => {
+      const s = sessions.get(sessionId);
+      const startedAt = s?.createdAt ?? new Date();
       sessions.delete(sessionId);
       logger.info(`Session disconnected: ${sessionId}`);
+      if (onSessionEnd) {
+        void Promise.resolve(onSessionEnd(sessionId, startedAt)).catch((err: unknown) => {
+          logger.warn('onSessionEnd callback failed', {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+      }
     });
 
     socket.on('ping', () => {

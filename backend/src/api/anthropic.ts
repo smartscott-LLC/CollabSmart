@@ -4,13 +4,15 @@ import logger from '../logger';
 import { TOOL_DEFINITIONS, dispatchTool } from '../tools';
 import { broadcastLog } from '../orchestrator';
 import { MemoryManager } from '../memory';
+import { getSetting } from '../settings';
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || '',
 });
 
-const MODEL = 'claude-haiku-4-5-20251001';
-const MAX_TOKENS = 4096;
+// Env-var defaults; overridden at call time by the DB settings.
+const DEFAULT_MODEL = process.env.AI_MODEL || 'claude-haiku-4-5-20251001';
+const DEFAULT_MAX_TOKENS = parseInt(process.env.AI_MAX_TOKENS || '4096', 10);
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -20,15 +22,20 @@ export interface ChatMessage {
 export interface ConversationSession {
   history: ChatMessage[];
   userId?: string;
+  startedAt: Date;
 }
 
 const conversations = new Map<string, ConversationSession>();
 
 function getOrCreateConversation(sessionId: string, userId?: string): ConversationSession {
   if (!conversations.has(sessionId)) {
-    conversations.set(sessionId, { history: [], userId });
+    conversations.set(sessionId, { history: [], userId, startedAt: new Date() });
   }
   return conversations.get(sessionId)!;
+}
+
+export function getConversation(sessionId: string): ConversationSession | undefined {
+  return conversations.get(sessionId);
 }
 
 export function clearConversation(sessionId: string, memory: MemoryManager): void {
@@ -36,10 +43,10 @@ export function clearConversation(sessionId: string, memory: MemoryManager): voi
   void memory.clearSession(sessionId);
 }
 
-function emitAILog(message: string, type = 'ai'): void {
+function emitAILog(message: string, model: string, type = 'ai'): void {
   broadcastLog({
     timestamp: new Date().toISOString(),
-    source: MODEL,
+    source: model,
     actor: 'ai',
     message,
     type,
@@ -73,6 +80,10 @@ export async function processChat(
 ): Promise<string> {
   const conversation = getOrCreateConversation(sessionId, userId);
 
+  // Read runtime settings (DB-backed, cached 60 s, env-var fallback)
+  const model = await getSetting('ai_model', DEFAULT_MODEL);
+  const maxTokens = parseInt(await getSetting('ai_max_tokens', String(DEFAULT_MAX_TOKENS)), 10);
+
   // Analyse context and retrieve tiered memory before calling Claude
   const enrichedContext = await memory.analyzeAndRetrieve(sessionId, userMessage, userId);
 
@@ -93,11 +104,11 @@ export async function processChat(
     let continueLoop = true;
 
     while (continueLoop) {
-      emitAILog('Thinking...', 'thinking');
+      emitAILog('Thinking...', model, 'thinking');
 
       const response = await anthropic.messages.create({
-        model: MODEL,
-        max_tokens: MAX_TOKENS,
+        model,
+        max_tokens: maxTokens,
         system: systemPrompt,
         tools: TOOL_DEFINITIONS as Anthropic.Tool[],
         messages,
@@ -113,9 +124,9 @@ export async function processChat(
           if (block.type === 'text') {
             socket.emit('chat:typing', { text: block.text });
             finalResponse += block.text;
-            emitAILog(block.text, 'text');
+            emitAILog(block.text, model, 'text');
           } else if (block.type === 'tool_use') {
-            emitAILog(`Using tool: ${block.name}`, 'tool-call');
+            emitAILog(`Using tool: ${block.name}`, model, 'tool-call');
             socket.emit('tool:start', { name: block.name, input: block.input });
 
             const result = await dispatchTool(
@@ -149,7 +160,7 @@ export async function processChat(
     }
 
     conversation.history.push({ role: 'assistant', content: finalResponse });
-    emitAILog(finalResponse, 'response');
+    emitAILog(finalResponse, model, 'response');
 
     // Persist the completed interaction across all memory tiers
     await memory.storeInteraction(
@@ -164,7 +175,7 @@ export async function processChat(
   } catch (err: unknown) {
     const error = err instanceof Error ? err.message : String(err);
     logger.error(`AI API error: ${error}`);
-    emitAILog(`Error: ${error}`, 'error');
+    emitAILog(`Error: ${error}`, model, 'error');
     throw err;
   }
 }
