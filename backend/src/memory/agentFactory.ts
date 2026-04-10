@@ -76,6 +76,13 @@ export interface RecordInvocationParams {
   scenarioType: string;
 }
 
+// Importance score increment applied each time the same pattern is seen again.
+// The scale runs 0–10; +0.5 per repetition is conservative enough to reach
+// the maximum (10.0) only after ~10 additional successful uses of a pattern
+// that started at 5.0.
+const PATTERN_REPEAT_IMPORTANCE_BOOST = 0.5;
+const PATTERN_IMPORTANCE_MAX = 10.0;
+
 // ─── Agent Factory ─────────────────────────────────────────────────────────
 
 export class AgentFactory {
@@ -225,46 +232,37 @@ export class AgentFactory {
 
     const patternName = `${scenarioType}: ${toolSequence.join(' → ')}`;
 
-    // Check whether an identical pattern already exists
-    const existing = await this.pool.query<{ id: string; success_count: number }>(
-      `SELECT id, success_count
-       FROM tool_success_patterns
-       WHERE tool_sequence = $1 AND scenario_type = $2
-       LIMIT 1`,
-      [toolSequence, scenarioType],
+    // Upsert: if an identical sequence+scenario already exists, increment its
+    // success counter and boost importance.  A UNIQUE index on
+    // (tool_sequence, scenario_type) in the schema ensures a single round-trip.
+    await this.pool.query(
+      `INSERT INTO tool_success_patterns
+         (pattern_name, scenario_type, tool_sequence, context_description,
+          outcome_description, success_count, tags, programming_languages,
+          session_id, user_id, importance_score)
+       VALUES ($1,$2,$3,$4,$5,1,$6,$7,$8,$9,$10)
+       ON CONFLICT (tool_sequence, scenario_type) DO UPDATE
+         SET success_count    = tool_success_patterns.success_count + 1,
+             last_used        = NOW(),
+             importance_score = LEAST(
+               tool_success_patterns.importance_score + $11,
+               $12
+             )`,
+      [
+        patternName,
+        scenarioType,
+        toolSequence,
+        contextDescription,
+        outcomeDescription,
+        [],
+        programmingLanguages,
+        sessionId,
+        userId ?? null,
+        importanceScore,
+        PATTERN_REPEAT_IMPORTANCE_BOOST,
+        PATTERN_IMPORTANCE_MAX,
+      ],
     );
-
-    if (existing.rows.length > 0) {
-      const row = existing.rows[0];
-      await this.pool.query(
-        `UPDATE tool_success_patterns
-         SET success_count  = success_count + 1,
-             last_used      = NOW(),
-             importance_score = LEAST(importance_score + 0.5, 10.0)
-         WHERE id = $1`,
-        [row.id],
-      );
-    } else {
-      await this.pool.query(
-        `INSERT INTO tool_success_patterns
-           (pattern_name, scenario_type, tool_sequence, context_description,
-            outcome_description, success_count, tags, programming_languages,
-            session_id, user_id, importance_score)
-         VALUES ($1,$2,$3,$4,$5,1,$6,$7,$8,$9,$10)`,
-        [
-          patternName,
-          scenarioType,
-          toolSequence,
-          contextDescription,
-          outcomeDescription,
-          [],
-          programmingLanguages,
-          sessionId,
-          userId ?? null,
-          importanceScore,
-        ],
-      );
-    }
 
     logger.debug(`[AgentFactory] stored success pattern: ${patternName}`);
   }

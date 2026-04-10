@@ -519,6 +519,9 @@ CREATE INDEX IF NOT EXISTS idx_tsp_score     ON tool_success_patterns(importance
 CREATE INDEX IF NOT EXISTS idx_tsp_used      ON tool_success_patterns(last_used DESC);
 CREATE INDEX IF NOT EXISTS idx_tsp_tools     ON tool_success_patterns USING GIN(tool_sequence);
 CREATE INDEX IF NOT EXISTS idx_tsp_tags      ON tool_success_patterns USING GIN(tags);
+-- Unique constraint that enables the ON CONFLICT upsert in AgentFactory.storeSuccessPattern
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tsp_unique_seq
+    ON tool_success_patterns(tool_sequence, scenario_type);
 
 DO $$
 BEGIN

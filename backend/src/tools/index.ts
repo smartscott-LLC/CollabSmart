@@ -1,4 +1,4 @@
-import { exec } from 'child_process';
+import { exec, execFile } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
 import path from 'path';
@@ -6,6 +6,7 @@ import logger from '../logger';
 import { broadcastLog } from '../orchestrator';
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 const WORKSPACE_PATH = process.env.WORKSPACE_PATH || '/workspace';
 
@@ -128,7 +129,8 @@ export async function toolFileList(dirPath = '.'): Promise<ToolResult> {
 
 /**
  * Search file contents in the workspace using grep.
- * Pattern is a basic string (not a regex) — escaped before passing to grep.
+ * Uses execFileAsync (no shell) so pattern and glob are passed as distinct
+ * arguments — preventing any shell-injection risk.
  */
 export async function toolFileSearch(
   pattern: string,
@@ -140,19 +142,19 @@ export async function toolFileSearch(
     return { success: false, error: 'Path traversal attempt blocked' };
   }
   emitToolLog('file_search', `Searching for "${pattern}" in ${dirPath}`);
-  // Use -r for recursive, -l for filenames only when too many results, --include for glob filter
-  // execAsync is used; the pattern argument is passed via env to avoid injection
   try {
-    const { stdout, stderr } = await execAsync(
-      `grep -r --include="${fileGlob}" -n -I --max-count=20 -F "${pattern.replace(/"/g, '\\"')}" .`,
+    const { stdout, stderr } = await execFileAsync(
+      'grep',
+      ['-r', `--include=${fileGlob}`, '-n', '-I', '--max-count=20', '-F', pattern, '.'],
       { cwd: safePath, timeout: 10000, maxBuffer: 512 * 1024 },
     );
     const output = stdout || stderr || '(no matches)';
     emitToolLog('file_search', output.slice(0, 500));
     return { success: true, output };
   } catch (err: unknown) {
-    // grep exits 1 when no match — treat as success with empty results
-    if (err instanceof Error && 'code' in err && Number((err as NodeJS.ErrnoException & { code: unknown }).code) === 1) {
+    // grep exits with code 1 when there are no matches — not an error
+    if (err instanceof Error && typeof (err as NodeJS.ErrnoException).code === 'number'
+        && (err as NodeJS.ErrnoException & { code: number }).code === 1) {
       return { success: true, output: '(no matches)' };
     }
     const error = err instanceof Error ? err.message : String(err);
@@ -170,14 +172,27 @@ export async function toolProcessMonitor(): Promise<ToolResult> {
 
 /**
  * Tail a log file from the workspace.
+ * Uses execFileAsync (no shell) so the file path is passed as a distinct
+ * argument — preventing shell injection via crafted path names.
  */
 export async function toolLogTail(logFile: string, lines = 50): Promise<ToolResult> {
   const safePath = path.resolve(WORKSPACE_PATH, logFile.replace(/^\//, ''));
   if (!safePath.startsWith(WORKSPACE_PATH)) {
     return { success: false, error: 'Path traversal attempt blocked' };
   }
-  emitToolLog('log_tail', `Tailing ${logFile} (${lines} lines)`);
-  return toolBash(`tail -n ${lines} "${safePath}" 2>&1`);
+  const safeLines = Math.min(Math.max(1, Math.trunc(lines)), 1000);
+  emitToolLog('log_tail', `Tailing ${logFile} (${safeLines} lines)`);
+  try {
+    const { stdout, stderr } = await execFileAsync(
+      'tail',
+      ['-n', String(safeLines), safePath],
+      { timeout: 5000, maxBuffer: 512 * 1024 },
+    );
+    return { success: true, output: stdout || stderr };
+  } catch (err: unknown) {
+    const error = err instanceof Error ? err.message : String(err);
+    return { success: false, error };
+  }
 }
 
 // ── Git tools ─────────────────────────────────────────────────────────────────
@@ -185,19 +200,42 @@ export async function toolLogTail(logFile: string, lines = 50): Promise<ToolResu
 /**
  * Show git status for the workspace repository.
  */
+/**
+ * Show git status for the workspace repository.
+ */
 export async function toolGitStatus(): Promise<ToolResult> {
   emitToolLog('git_status', 'git status');
-  return toolBash('git status 2>&1');
+  try {
+    const { stdout, stderr } = await execFileAsync('git', ['status'], {
+      cwd: WORKSPACE_PATH,
+      timeout: 10000,
+      maxBuffer: 256 * 1024,
+    });
+    return { success: true, output: stdout || stderr };
+  } catch (err: unknown) {
+    const error = err instanceof Error ? err.message : String(err);
+    return { success: false, error };
+  }
 }
 
 /**
  * Show git diff for the workspace repository.
- * Pass a specific file path to limit the diff, or leave empty for all changes.
+ * Uses execFileAsync (no shell) so a file path argument cannot inject commands.
  */
 export async function toolGitDiff(filePath?: string): Promise<ToolResult> {
-  const target = filePath ? ` -- "${filePath.replace(/"/g, '\\"')}"` : '';
-  emitToolLog('git_diff', `git diff${target}`);
-  return toolBash(`git diff${target} 2>&1`);
+  emitToolLog('git_diff', filePath ? `git diff -- ${filePath}` : 'git diff');
+  try {
+    const args = filePath ? ['diff', '--', filePath] : ['diff'];
+    const { stdout, stderr } = await execFileAsync('git', args, {
+      cwd: WORKSPACE_PATH,
+      timeout: 15000,
+      maxBuffer: 512 * 1024,
+    });
+    return { success: true, output: stdout || stderr };
+  } catch (err: unknown) {
+    const error = err instanceof Error ? err.message : String(err);
+    return { success: false, error };
+  }
 }
 
 /**
@@ -206,20 +244,42 @@ export async function toolGitDiff(filePath?: string): Promise<ToolResult> {
 export async function toolGitLog(limit = 10): Promise<ToolResult> {
   const safeLimit = Math.min(Math.max(1, limit), 50);
   emitToolLog('git_log', `git log --oneline -${safeLimit}`);
-  return toolBash(`git log --oneline -${safeLimit} 2>&1`);
+  try {
+    const { stdout, stderr } = await execFileAsync(
+      'git',
+      ['log', '--oneline', `-${safeLimit}`],
+      { cwd: WORKSPACE_PATH, timeout: 10000, maxBuffer: 256 * 1024 },
+    );
+    return { success: true, output: stdout || stderr };
+  } catch (err: unknown) {
+    const error = err instanceof Error ? err.message : String(err);
+    return { success: false, error };
+  }
 }
 
 /**
  * Stage all changes and commit with the given message.
- * Only operates within the workspace directory.
+ * Uses execFileAsync (no shell) so the commit message cannot inject commands
+ * via shell metacharacters, backticks, or $(...) substitutions.
  */
 export async function toolGitCommit(message: string): Promise<ToolResult> {
   if (!message || message.trim().length === 0) {
     return { success: false, error: 'Commit message cannot be empty' };
   }
-  const safeMsg = message.replace(/"/g, '\\"').slice(0, 500);
+  const safeMsg = message.slice(0, 500);
   emitToolLog('git_commit', `git commit: ${safeMsg}`);
-  return toolBash(`git add -A && git commit -m "${safeMsg}" 2>&1`);
+  try {
+    await execFileAsync('git', ['add', '-A'], { cwd: WORKSPACE_PATH, timeout: 10000 });
+    const { stdout, stderr } = await execFileAsync(
+      'git',
+      ['commit', '-m', safeMsg],
+      { cwd: WORKSPACE_PATH, timeout: 15000, maxBuffer: 256 * 1024 },
+    );
+    return { success: true, output: stdout || stderr };
+  } catch (err: unknown) {
+    const error = err instanceof Error ? err.message : String(err);
+    return { success: false, error };
+  }
 }
 
 // ── Memory tools ──────────────────────────────────────────────────────────────
