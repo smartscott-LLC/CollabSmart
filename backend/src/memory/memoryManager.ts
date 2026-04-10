@@ -95,6 +95,10 @@ export class MemoryManager {
     }
 
     try {
+      // With lazyConnect: true, we must explicitly connect before issuing commands
+      if (this.redis.status === 'wait') {
+        await this.redis.connect();
+      }
       await this.redis.ping();
       this.redisAvailable = true;
       logger.info('MemoryManager: Dragonfly/Redis connection verified');

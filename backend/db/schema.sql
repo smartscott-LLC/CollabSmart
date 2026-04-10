@@ -394,3 +394,71 @@ BEGIN
     RETURN LEAST(score, 10.0);
 END;
 $$ LANGUAGE plpgsql;
+
+-- ==================================================
+-- APP SETTINGS
+-- Runtime-configurable key/value store.
+-- Defaults are seeded here; values can be changed via the Settings panel.
+-- ==================================================
+CREATE TABLE IF NOT EXISTS app_settings (
+    key         VARCHAR(100) PRIMARY KEY,
+    value       TEXT        NOT NULL,
+    description TEXT,
+    updated_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+INSERT INTO app_settings (key, value, description) VALUES
+    ('session_recording_enabled', 'false',
+        'Record full session transcripts so they can be replayed from the Settings panel'),
+    ('memory_promotion_threshold', '5.0',
+        'Importance score (0.0–10.0) required to promote a memory to long-term storage'),
+    ('working_memory_ttl_hours', '48',
+        'Hours before Dragonfly working-memory entries expire'),
+    ('session_timeout_minutes', '30',
+        'Minutes of inactivity before a session is automatically disconnected'),
+    ('max_conversation_history', '100',
+        'Maximum in-memory conversation turns kept per session'),
+    ('log_level', 'info',
+        'Backend logging verbosity: debug | info | warn | error'),
+    ('ai_model', 'claude-haiku-4-5-20251001',
+        'Anthropic model ID used for all AI responses'),
+    ('ai_max_tokens', '4096',
+        'Maximum tokens the AI may generate per response (256–8192)'),
+    ('dragonfly_max_memory', '512mb',
+        'Dragonfly maximum memory allocation (e.g. 256mb, 1gb)')
+ON CONFLICT (key) DO NOTHING;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_app_settings_updated_at') THEN
+        CREATE TRIGGER trg_app_settings_updated_at
+            BEFORE UPDATE ON app_settings
+            FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+    END IF;
+END
+$$;
+
+-- ==================================================
+-- SESSION RECORDINGS
+-- Full conversation snapshots for rewind/replay.
+-- Written when a session ends (if session_recording_enabled = 'true').
+-- ==================================================
+CREATE TABLE IF NOT EXISTS session_recordings (
+    id               UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id       VARCHAR(255) NOT NULL,
+    user_id          VARCHAR(255),
+    title            VARCHAR(500),
+    messages         JSONB        NOT NULL DEFAULT '[]'::jsonb,
+    message_count    INTEGER      DEFAULT 0,
+    duration_seconds INTEGER      DEFAULT 0,
+    started_at       TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    ended_at         TIMESTAMPTZ  DEFAULT NOW(),
+    scenario_types   TEXT[]       DEFAULT '{}',
+    tags             TEXT[]       DEFAULT '{}',
+    created_at       TIMESTAMPTZ  DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_sr_session   ON session_recordings(session_id);
+CREATE INDEX IF NOT EXISTS idx_sr_started   ON session_recordings(started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sr_user      ON session_recordings(user_id);
+CREATE INDEX IF NOT EXISTS idx_sr_scenarios ON session_recordings USING GIN(scenario_types);

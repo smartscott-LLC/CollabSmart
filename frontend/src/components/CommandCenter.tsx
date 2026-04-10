@@ -5,6 +5,7 @@ import { useSocketStore } from '../hooks/useSocket';
 import ChatPane from './ChatPane';
 import LogSidebar from './LogSidebar';
 import DesktopFrame from './DesktopFrame';
+import SettingsPanel from './SettingsPanel';
 
 const NOVNC_URL = process.env.NEXT_PUBLIC_NOVNC_URL || 'http://localhost:6080/vnc.html';
 
@@ -21,6 +22,7 @@ export default function CommandCenter() {
   // Pane sizing state (% widths for left/center/right)
   const [panes, setPanes] = useState({ chat: 25, desktop: 45, logs: 30 });
   const [desktopVisible, setDesktopVisible] = useState(true);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Drag state for resize handles
   const dragRef = useRef<{
@@ -101,6 +103,28 @@ export default function CommandCenter() {
             <div className={`w-2 h-2 rounded-full ${STATUS_COLORS[status] || 'bg-gray-600'}`} />
             <span className="text-xs text-gray-400 capitalize">{status}</span>
           </div>
+
+          {/* Settings gear */}
+          <button
+            onClick={() => setSettingsOpen(true)}
+            title="Open Settings"
+            className="flex items-center justify-center w-7 h-7 rounded border border-sharp-border
+              text-gray-400 hover:text-sharp-accent hover:border-sharp-accent transition-colors"
+            aria-label="Open settings"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="w-4 h-4"
+            >
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+          </button>
         </div>
       </header>
 
@@ -145,6 +169,9 @@ export default function CommandCenter() {
           <LogSidebar />
         </div>
       </div>
+
+      {/* Settings panel modal */}
+      {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
     </div>
   );
 }

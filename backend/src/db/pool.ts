@@ -42,7 +42,7 @@ export function getRedisClient(): Redis {
       db: parseInt(process.env.DRAGONFLY_DB || '0', 10),
       maxRetriesPerRequest: 3,
       lazyConnect: true,
-      enableOfflineQueue: false,
+      retryStrategy: (times) => Math.min(times * 200, 5000),
     });
 
     redisClient.on('error', (err) => {

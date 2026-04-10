@@ -5,15 +5,17 @@ import { Server as SocketIOServer } from 'socket.io';
 import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
+import { execSync } from 'child_process';
 import logger from './logger';
 import { initOrchestrator } from './orchestrator';
-import { processChat, clearConversation } from './api/anthropic';
+import { processChat, clearConversation, getConversation } from './api/anthropic';
 import { getPgPool, getRedisClient, initSchema, closePools } from './db/pool';
 import { MemoryManager } from './memory';
+import { getAllSettingsWithMeta, getSetting, setSetting } from './settings';
 
 const PORT = parseInt(process.env.PORT || '3001', 10);
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
-
 const WORKSPACE_PATH = process.env.WORKSPACE_PATH || '/workspace';
 
 const app = express();
@@ -34,7 +36,6 @@ const io = new SocketIOServer(server, {
 const memory = new MemoryManager(getPgPool(), getRedisClient());
 
 async function bootstrap(): Promise<void> {
-  // Attempt to connect to backing stores and run schema migration
   try {
     await initSchema();
   } catch (err) {
@@ -46,16 +47,137 @@ async function bootstrap(): Promise<void> {
   await memory.connect();
 }
 
-// Health check endpoint
+// ── Health ─────────────────────────────────────────────────────────────────
+
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// REST endpoint to clear conversation history and all memory tiers for a session
+// ── Resource metrics ───────────────────────────────────────────────────────
+
+app.get('/api/health/resources', (_req, res) => {
+  const totalMem = os.totalmem();
+  const freeMem = os.freemem();
+
+  let diskInfo = { total: 0, used: 0, available: 0, path: WORKSPACE_PATH };
+  try {
+    const dfLine = execSync(`df -k "${WORKSPACE_PATH}" | tail -1`).toString().trim();
+    const parts = dfLine.split(/\s+/);
+    diskInfo = {
+      path: WORKSPACE_PATH,
+      total: parseInt(parts[1], 10) * 1024,
+      used: parseInt(parts[2], 10) * 1024,
+      available: parseInt(parts[3], 10) * 1024,
+    };
+  } catch {
+    // df not available (e.g. non-Linux dev env)
+  }
+
+  res.json({
+    memory: {
+      total: totalMem,
+      free: freeMem,
+      used: totalMem - freeMem,
+      usedPct: Math.round(((totalMem - freeMem) / totalMem) * 100),
+    },
+    disk: {
+      ...diskInfo,
+      usedPct:
+        diskInfo.total > 0
+          ? Math.round((diskInfo.used / diskInfo.total) * 100)
+          : 0,
+    },
+    uptime: Math.round(process.uptime()),
+    nodeVersion: process.version,
+  });
+});
+
+// ── Settings ───────────────────────────────────────────────────────────────
+
+app.get('/api/settings', async (_req, res) => {
+  try {
+    const rows = await getAllSettingsWithMeta();
+    res.json(rows);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
+});
+
+app.put('/api/settings/:key', async (req, res) => {
+  const { key } = req.params;
+  const { value } = req.body as { value?: string };
+
+  if (!key || value === undefined) {
+    res.status(400).json({ error: 'key and value are required' });
+    return;
+  }
+
+  try {
+    await setSetting(key, String(value));
+    res.json({ success: true, key, value });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
+});
+
+// ── Conversation ───────────────────────────────────────────────────────────
+
 app.delete('/api/conversation/:sessionId', (req, res) => {
   clearConversation(req.params.sessionId, memory);
   res.json({ success: true });
 });
+
+// ── Session Recordings ─────────────────────────────────────────────────────
+
+app.get('/api/recordings', async (_req, res) => {
+  try {
+    const pool = getPgPool();
+    const result = await pool.query(
+      `SELECT id, session_id, user_id, title, message_count, duration_seconds,
+              started_at, ended_at, scenario_types, tags
+       FROM session_recordings
+       ORDER BY started_at DESC
+       LIMIT 50`,
+    );
+    res.json(result.rows);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
+});
+
+app.get('/api/recordings/:id', async (req, res) => {
+  try {
+    const pool = getPgPool();
+    const result = await pool.query(
+      'SELECT * FROM session_recordings WHERE id = $1',
+      [req.params.id],
+    );
+    if (result.rows.length === 0) {
+      res.status(404).json({ error: 'Recording not found' });
+      return;
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
+});
+
+app.delete('/api/recordings/:id', async (req, res) => {
+  try {
+    const pool = getPgPool();
+    await pool.query('DELETE FROM session_recordings WHERE id = $1', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
+});
+
+// ── File Upload ────────────────────────────────────────────────────────────
 
 interface UploadFile {
   relativePath: string;
@@ -77,7 +199,6 @@ function isRateLimited(ip: string): boolean {
   return false;
 }
 
-// REST endpoint to upload files/folders into the workspace
 app.post('/api/upload', (req, res) => {
   const ip = req.ip ?? req.socket.remoteAddress ?? 'unknown';
   if (isRateLimited(ip)) {
@@ -106,7 +227,6 @@ app.post('/api/upload', (req, res) => {
       continue;
     }
 
-    // Normalise and guard against path traversal
     const normalised = path.normalize(file.relativePath).replace(/^(\.\.(\/|\\|$))+/, '');
     const destPath = path.resolve(WORKSPACE_PATH, 'uploads', normalised);
 
@@ -135,10 +255,55 @@ app.post('/api/upload', (req, res) => {
   res.json({ uploadedPaths, errors });
 });
 
-// Initialise WebSocket orchestrator
-initOrchestrator(io);
+// ── Save session recording on disconnect ──────────────────────────────────
 
-// Chat message handler
+async function saveSessionRecording(sessionId: string, startedAt: Date): Promise<void> {
+  const conv = getConversation(sessionId);
+  if (!conv || conv.history.length === 0) return;
+
+  try {
+    const enabled = await getSetting('session_recording_enabled', 'false');
+    if (enabled !== 'true') return;
+
+    const pool = getPgPool();
+    const endedAt = new Date();
+    const durationSeconds = Math.round((endedAt.getTime() - startedAt.getTime()) / 1000);
+    const title = `Session ${sessionId.slice(0, 8)} — ${endedAt.toLocaleString()}`;
+
+    const messages = conv.history.map((m, i) => ({
+      index: i,
+      role: m.role,
+      content: m.content,
+    }));
+
+    await pool.query(
+      `INSERT INTO session_recordings
+         (session_id, user_id, title, messages, message_count, duration_seconds, started_at, ended_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        sessionId,
+        conv.userId ?? null,
+        title,
+        JSON.stringify(messages),
+        conv.history.length,
+        durationSeconds,
+        startedAt,
+        endedAt,
+      ],
+    );
+
+    logger.info(`Session recording saved: ${sessionId} (${conv.history.length} messages)`);
+  } catch (err) {
+    logger.warn('Failed to save session recording', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+// ── WebSocket ──────────────────────────────────────────────────────────────
+
+initOrchestrator(io, saveSessionRecording);
+
 io.on('connection', (socket) => {
   socket.on('chat:message', async (data: { sessionId: string; message: string; userId?: string }) => {
     const { sessionId, message, userId } = data;
@@ -159,7 +324,8 @@ io.on('connection', (socket) => {
   });
 });
 
-// Graceful shutdown
+// ── Graceful shutdown ──────────────────────────────────────────────────────
+
 function shutdown(): void {
   logger.info('Shutting down...');
   memory.destroy();

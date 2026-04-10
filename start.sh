@@ -21,8 +21,27 @@ fi
 if [ ! -f ".env" ]; then
   echo "[setup] Creating .env from .env.example..."
   cp .env.example .env
-  echo "[setup] Please edit .env and set your ANTHROPIC_API_KEY, then re-run this script."
+  echo ""
+  echo "  ⚠  .env created with default passwords."
+  echo "     Open .env and:"
+  echo "       1. Set ANTHROPIC_API_KEY"
+  echo "       2. Change POSTGRES_PASSWORD, DRAGONFLY_PASSWORD, and VNC_PASSWORD"
+  echo "          to strong, unique values before running in production."
+  echo ""
+  echo "  ℹ  After changing POSTGRES_PASSWORD for the first time you MUST also"
+  echo "     reset the postgres volume so the new password takes effect:"
+  echo "       docker compose down -v"
+  echo "     (This removes all stored memory data — only needed on first setup.)"
+  echo ""
+  echo "  Re-run ./start.sh once you have set ANTHROPIC_API_KEY."
   exit 0
+fi
+
+# Warn if ANTHROPIC_API_KEY is still the placeholder
+if grep -q 'your_anthropic_api_key_here' .env 2>/dev/null; then
+  echo "[ERROR] ANTHROPIC_API_KEY is not set in .env."
+  echo "        Edit .env and replace 'your_anthropic_api_key_here' with your real key."
+  exit 1
 fi
 
 echo "[setup] Building and starting services..."
@@ -36,7 +55,13 @@ echo ""
 echo "  Frontend:  http://localhost:3000"
 echo "  Backend:   http://localhost:3001"
 echo "  Desktop:   http://localhost:6080"
+echo "             (VNC password: see VNC_PASSWORD in .env)"
+echo ""
+echo "  Settings panel: click the ⚙ gear icon in the top-right of the UI"
 echo ""
 echo "  Logs:  docker compose logs -f"
 echo "  Stop:  docker compose down"
+echo ""
+echo "  ℹ  If postgres auth fails after a password change, reset the volume:"
+echo "       docker compose down -v && ./start.sh"
 echo ""
