@@ -6,6 +6,7 @@ export { LongTermMemory } from './longTermMemory';
 export { PersonalityLearning } from './personalityLearning';
 export { ModeSelector } from './modeSelector';
 export { OnetIntegration } from './onetIntegration';
+export { AgentFactory } from './agentFactory';
 export { MemoryManager } from './memoryManager';
 export type {
   CollabMode,
@@ -15,3 +16,4 @@ export type {
   UserProfile,
   EnrichedContext,
 } from './types';
+export type { SpecializedAgent, ToolSuccessPattern } from './agentFactory';

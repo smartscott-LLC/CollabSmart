@@ -15,13 +15,15 @@
 
 ## ✨ What is CollabSmart?
 
-CollabSmart creates a **shared containerized workspace** where you and an AI agent (powered by Claude) collaborate in real-time. You interact through a browser-based chat interface and can watch a live XFCE4 desktop — while the AI reads/writes files and runs shell commands in the same shared environment.
+CollabSmart creates a **shared containerized workspace** where you and an AI agent (powered by Claude) collaborate in real-time.  The AI is a **co-worker**, not a tool — it thinks, explores, suggests, and builds alongside you.  You interact through a browser chat interface; the AI can see and act in the same Linux desktop environment via a shared file system and shell.
 
-- 🖥️ **Live shared desktop** — Watch the AI work alongside you via an in-browser noVNC view
-- 💬 **Streaming AI chat** — Real-time token-by-token responses from Claude
+- 🖥️ **Live shared desktop** — Watch the AI work via an in-browser noVNC view
+- 💬 **Streaming AI chat** — Real-time responses from Claude Haiku 4.5
 - 🧠 **Tiered memory system** — The AI remembers context across sessions using Dragonfly + PostgreSQL
-- 🛠️ **AI tool use** — Claude can run bash commands, read/write files, tail logs, and monitor processes
+- 🤖 **Specialized Agent Factory** — Domain-expert agents (debugger, architect, security analyst, …) auto-activate per scenario and evolve through usage
+- 🔧 **Expanded tool set** — File operations, search, git, memory recall/store
 - 🎯 **Adaptive collaboration modes** — AI dynamically shifts between pair-programming, teaching, debugging, and more
+- 📐 **Tool pattern memory** — Proven tool-use sequences are remembered and replayed in future sessions
 
 ---
 
@@ -112,10 +114,21 @@ CollabSmart/
 │   │   ├── api/anthropic.ts  # Claude Haiku 4.5 integration + tool-use loop
 │   │   ├── db/               # PostgreSQL pool + schema initialisation
 │   │   ├── memory/           # 4-tier memory system (see below)
+│   │   │   ├── agentFactory.ts       # Specialized agent selection + tool pattern memory
+│   │   │   ├── memoryManager.ts      # Central orchestrator for all memory tiers
+│   │   │   ├── workingMemory.ts      # Tier 1 — Dragonfly (0-48h)
+│   │   │   ├── shortTermMemory.ts    # Tier 2 — PostgreSQL (48-96h)
+│   │   │   ├── longTermMemory.ts     # Tier 3 + LTM — PostgreSQL (permanent)
+│   │   │   ├── contextAnalyzer.ts    # Scenario, urgency, emotion detection
+│   │   │   ├── personalityLearning.ts # Per-user preference learning
+│   │   │   ├── modeSelector.ts       # Collaboration mode selection
+│   │   │   └── onetIntegration.ts    # O*NET occupation enrichment
 │   │   ├── orchestrator/     # WebSocket session manager + broadcastLog()
 │   │   ├── tools/index.ts    # Tool implementations + TOOL_DEFINITIONS
+│   │   ├── settings/         # DB-backed runtime settings (60s cache)
 │   │   ├── scripts/          # CLI scripts (O*NET data ingestion)
 │   │   └── logger/index.ts   # Winston logger
+│   ├── db/schema.sql         # Full PostgreSQL schema (auto-applied on startup)
 │   ├── Dockerfile
 │   ├── package.json
 │   └── tsconfig.json
@@ -127,7 +140,8 @@ CollabSmart/
 │   │   │   ├── CommandCenter.tsx      # Root layout: 3 resizable panes
 │   │   │   ├── ChatPane/index.tsx     # Chat UI with message bubbles
 │   │   │   ├── DesktopFrame/index.tsx # noVNC iframe wrapper
-│   │   │   └── LogSidebar/index.tsx   # Live activity log stream
+│   │   │   ├── LogSidebar/index.tsx   # Live activity log stream
+│   │   │   └── SettingsPanel/index.tsx # Runtime settings + resource metrics
 │   │   ├── hooks/useSocket.ts         # Zustand store + socket.io-client
 │   │   └── utils/formatters.ts        # Log colour / actor-badge helpers
 │   ├── Dockerfile
@@ -141,11 +155,11 @@ CollabSmart/
 │   └── configs/xstartup      # VNC startup config
 │
 └── memory/                   # Python reference implementation of the memory system
-    ├── memory_system/        # Core memory tier implementations
-    ├── agent_factory/        # Agent scaffolding utilities
-    ├── council/              # Multi-agent council logic
+    │                         # (TypeScript production code is in backend/src/memory/)
+    ├── memory_system/        # Core memory tier reference implementations
+    ├── agent_factory/        # Specialized agent factory schema & architecture docs
     ├── onet_integration/     # O*NET occupation data helpers
-    └── ...
+    └── personality/          # Collaboration mode & personality learning reference
 ```
 
 ---
@@ -161,23 +175,38 @@ cp .env.example .env
 | Variable | Default | Required | Description |
 |---|---|---|---|
 | `ANTHROPIC_API_KEY` | — | ✅ | Claude API key |
+| `PORT` | `3001` | | Backend HTTP/WS listen port |
+| `WORKSPACE_PATH` | `/workspace` | | Filesystem root for all AI tool operations |
 | `FRONTEND_URL` | `http://localhost:3000` | | CORS allowed origin for the backend |
 | `NEXT_PUBLIC_BACKEND_URL` | `http://localhost:3001` | | Socket.IO + REST endpoint (frontend) |
 | `NEXT_PUBLIC_NOVNC_URL` | `http://localhost:6080` | | noVNC iframe URL (frontend) |
-| `WORKSPACE_PATH` | `/workspace` | | Filesystem root for all AI tool operations |
+| `AI_MODEL` | `claude-haiku-4-5-20251001` | | Claude model identifier |
+| `AI_MAX_TOKENS` | `4096` | | Max tokens per response |
 | `POSTGRES_HOST` | `postgres` | | PostgreSQL hostname |
 | `POSTGRES_PORT` | `5432` | | PostgreSQL port |
 | `POSTGRES_DB` | `collabsmart` | | Database name |
 | `POSTGRES_USER` | `collabsmart` | | Database user |
-| `POSTGRES_PASSWORD` | `change_me_in_production` | ✅ | Database password |
+| `POSTGRES_PASSWORD` | `collabsmart` | ✅ (prod) | Database password — **change for production** |
 | `DRAGONFLY_HOST` | `dragonfly` | | Dragonfly/Redis hostname |
 | `DRAGONFLY_PORT` | `6379` | | Dragonfly/Redis port |
+| `DRAGONFLY_PASSWORD` | `dragonfly_secret` | ✅ (prod) | Dragonfly password — **change for production** |
+| `DRAGONFLY_MAX_MEMORY` | `512mb` | | Max memory for Dragonfly working cache |
+| `VNC_PASSWORD` | `collabsmart_vnc` | ✅ (prod) | noVNC password — **change for production** |
 | `ONET_API_BASE` | `https://services.onetcenter.org/ws` | | O*NET Web Services base URL |
 | `ONET_USERNAME` | — | | O*NET username (optional) |
 | `ONET_PASSWORD` | — | | O*NET password (optional) |
 | `MEMORY_PROMOTION_THRESHOLD` | `5.0` | | Importance score (0–10) to promote to long-term memory |
-| `LOG_LEVEL` | `info` | | Winston log level (`debug`, `info`, `warn`, `error`) |
-| `PORT` | `3001` | | Backend HTTP/WS listen port |
+| `WORKING_MEMORY_TTL_HOURS` | `48` | | Hours before working-memory entries expire |
+| `AGENT_FACTORY_ENABLED` | `true` | | Enable specialized agent context injection |
+| `TOOL_PATTERN_MEMORY_ENABLED` | `true` | | Enable tool success pattern learning |
+| `MAX_TOOL_PATTERN_AGE_DAYS` | `30` | | Days before tool patterns are discarded (0=never) |
+| `SESSION_RECORDING_ENABLED` | `false` | | Record full session transcripts |
+| `SESSION_TIMEOUT_MINUTES` | `30` | | Minutes of inactivity before session disconnect |
+| `MAX_CONVERSATION_HISTORY` | `100` | | Max in-memory conversation turns per session |
+| `FEEDBACK_COLLECTION_ENABLED` | `true` | | Accept user feedback via POST /api/feedback |
+| `LOG_LEVEL` | `info` | | Winston log level |
+
+All of these (except `ANTHROPIC_API_KEY` and the `NEXT_PUBLIC_*` vars) can also be changed at runtime via the Settings panel without restarting — the DB-backed settings cache refreshes every 60 seconds.
 
 ---
 
@@ -230,7 +259,8 @@ Maintenance runs automatically every **6 hours** to age messages between tiers a
 | `ContextAnalyzer` | Detects scenario type, urgency, emotion, languages, and tools from each message |
 | `PersonalityLearning` | Tracks communication style, preferred languages, and collaboration preferences per user |
 | `ModeSelector` | Picks the best collaboration mode per interaction |
-| `OnetIntegration` | Enriches context with O*NET occupation and technology data |
+| `OnetIntegration` | Enriches context with O*NET occupation and technology data (optional) |
+| `AgentFactory` | Activates domain-expert agents per scenario; records invocations and stores tool success patterns |
 
 ### Collaboration Modes
 
@@ -244,17 +274,69 @@ Maintenance runs automatically every **6 hours** to age messages between tiers a
 
 ---
 
-## 🤖 AI Tool System
+## 🤖 Specialized Agent Factory
 
-Claude operates in an agentic tool-use loop and has five built-in tools:
+Seven domain-expert agents are seeded automatically on first startup:
+
+| Agent | Domain | Auto-activates when… |
+|---|---|---|
+| `code_architect` | Software Architecture | Architecture, system design, trade-off questions |
+| `debugger` | Debugging & Root-Cause Analysis | Errors, exceptions, crashes, "not working" |
+| `security_analyst` | Security & Vulnerabilities | Security, auth, injection, CVEs, secrets |
+| `devops_engineer` | DevOps & CI/CD | Deployment, Docker, Kubernetes, pipelines |
+| `code_reviewer` | Code Quality & Review | Code review, refactoring, best practices |
+| `performance_optimizer` | Performance Analysis | Slow code, benchmarking, bottlenecks |
+| `teacher` | Technical Teaching | "How do I", "explain", learning scenarios |
+
+Each agent contributes a specialized system-prompt fragment injected before Claude responds.  Invocations are tracked in `agent_invocations` and drive the learning loop.
+
+---
+
+## 🔧 Tool Pattern Memory
+
+When Claude successfully completes a multi-tool interaction, the tool sequence is stored in `tool_success_patterns`.  At the start of future sessions, the top matching patterns are injected into the system prompt:
+
+```
+## Proven Tool Sequences (use these when applicable)
+1. [debugging] file_read → bash → file_write: Traced a runtime exception and patched the failing function (used 5×)
+2. [deployment] bash → git_status → git_commit: Built and committed a working Docker config (used 3×)
+```
+
+Claude can also call `memory_recall` to search past patterns explicitly, and `memory_store` to save lessons for future sessions.
+
+---
+
+## 🛠️ AI Tool System
+
+Claude operates in an agentic tool-use loop and has **13 built-in tools**:
+
+### Workspace tools
 
 | Tool | Input | Description |
 |---|---|---|
-| `bash` | `{ command: string }` | Run a shell command in `/workspace` (30 s timeout) |
-| `file_write` | `{ path, content }` | Write a file at a relative path within the workspace |
+| `bash` | `{ command }` | Run a shell command in `/workspace` (30 s timeout) |
+| `file_write` | `{ path, content }` | Write a file at a relative path |
 | `file_read` | `{ path }` | Read a file from the workspace |
+| `file_list` | `{ path? }` | List files and directories (dirs first) |
+| `file_search` | `{ pattern, path?, file_glob? }` | Grep file contents with a literal pattern |
 | `process_monitor` | — | List running processes (`ps aux`) |
 | `log_tail` | `{ path, lines? }` | Tail a log file (default 50 lines) |
+
+### Git tools
+
+| Tool | Input | Description |
+|---|---|---|
+| `git_status` | — | Show modified / staged / untracked files |
+| `git_diff` | `{ path? }` | Show diff (optionally limited to a file) |
+| `git_log` | `{ limit? }` | Recent commit history (max 50) |
+| `git_commit` | `{ message }` | Stage all and commit (only when user requests) |
+
+### Memory tools
+
+| Tool | Input | Description |
+|---|---|---|
+| `memory_recall` | `{ query }` | Search long-term memory for relevant concepts |
+| `memory_store` | `{ concept, summary, entities?, scenario_types? }` | Store something important for future sessions |
 
 > **Security:** All file paths are resolved against `WORKSPACE_PATH`. Path-traversal attempts (`../`, absolute paths) are blocked before touching the filesystem.
 
@@ -288,7 +370,17 @@ Claude operates in an agentic tool-use loop and has five built-in tools:
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/health` | Returns `{ status: "ok", timestamp }` |
-| `DELETE` | `/api/conversation/:sessionId` | Clears in-memory history and all memory tiers for a session |
+| `GET` | `/api/health/resources` | CPU, memory, disk metrics |
+| `GET` | `/api/settings` | List all runtime settings |
+| `PUT` | `/api/settings/:key` | Update a runtime setting |
+| `DELETE` | `/api/conversation/:sessionId` | Clear in-memory history and memory tiers |
+| `GET` | `/api/recordings` | List saved session recordings |
+| `GET` | `/api/recordings/:id` | Fetch a specific recording |
+| `DELETE` | `/api/recordings/:id` | Delete a recording |
+| `POST` | `/api/upload` | Upload files into the workspace |
+| `POST` | `/api/feedback` | Submit a user feedback rating |
+| `GET` | `/api/agents` | List active specialized agents |
+| `GET` | `/api/patterns?scenario=&maxAge=` | List tool success patterns |
 
 ---
 
@@ -323,9 +415,7 @@ The UI is a dark-themed, three-pane layout built with Next.js 16 App Router and 
 | `sharp-ai` | `#06b6d4` | AI actor badges & highlights |
 | `sharp-user` | `#8b5cf6` | User actor badges |
 
-Font: **JetBrains Mono** throughout.
-
-State management: **Zustand** (`useSocketStore` in `hooks/useSocket.ts`).
+Font: **JetBrains Mono** throughout.  State: **Zustand** (`useSocketStore`).
 
 ---
 
@@ -365,6 +455,8 @@ npm run ingest:onet
 
 Register for free O*NET Web Services credentials at https://services.onetcenter.org/
 
+After ingesting, set `onet_enabled = true` in the Settings panel.
+
 ---
 
 ## 🐛 Troubleshooting
@@ -376,7 +468,9 @@ Register for free O*NET Web Services credentials at https://services.onetcenter.
 | Desktop iframe blank | noVNC container not ready | Wait for `desktop` healthcheck; check `docker compose logs desktop` |
 | `Path traversal attempt blocked` | Tool called with absolute or `../` path | Use relative paths inside `/workspace` |
 | SSR error on socket/xterm import | Next.js hydration | Import affected components with `dynamic(..., { ssr: false })` |
-| Memory degraded | PostgreSQL / Dragonfly not reachable | Check `docker compose logs postgres dragonfly`; system falls back to working-memory only |
+| Memory degraded | PostgreSQL / Dragonfly not reachable | Check `docker compose logs postgres dragonfly`; system falls back gracefully |
+| Agent factory not activating | `agent_factory_enabled` is false | Enable in Settings panel or set `AGENT_FACTORY_ENABLED=true` |
+| Tool patterns not learning | `tool_pattern_memory_enabled` is false | Enable in Settings panel or set `TOOL_PATTERN_MEMORY_ENABLED=true` |
 
 ---
 
@@ -386,6 +480,7 @@ Register for free O*NET Web Services credentials at https://services.onetcenter.
 |---|---|
 | Add a new AI tool | `backend/src/tools/index.ts` — add function, add to `TOOL_DEFINITIONS`, add `case` in `dispatchTool()` |
 | Change AI model or system prompt | `backend/src/api/anthropic.ts` |
+| Add or modify a specialized agent | `backend/db/schema.sql` — update the `specialized_agents` INSERT seed |
 | Add a WebSocket event | `backend/src/index.ts` (emit/on) + `frontend/src/hooks/useSocket.ts` (listener) |
 | Add a REST endpoint | `backend/src/index.ts` |
 | Add a new UI component | `frontend/src/components/` — new folder with `index.tsx` |

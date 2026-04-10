@@ -28,6 +28,7 @@ import { LongTermMemory } from './longTermMemory';
 import { PersonalityLearning } from './personalityLearning';
 import { ModeSelector } from './modeSelector';
 import { OnetIntegration } from './onetIntegration';
+import { AgentFactory } from './agentFactory';
 
 import {
   ContextAnalysis,
@@ -60,6 +61,7 @@ export class MemoryManager {
   private readonly personalityLearning: PersonalityLearning;
   private readonly modeSelector: ModeSelector;
   private readonly onetIntegration: OnetIntegration;
+  private readonly agentFactoryService: AgentFactory;
   private readonly maintenanceTimer: ReturnType<typeof setInterval>;
   private pgAvailable = false;
   private redisAvailable = false;
@@ -72,6 +74,7 @@ export class MemoryManager {
     this.personalityLearning = new PersonalityLearning(pool);
     this.modeSelector = new ModeSelector(pool);
     this.onetIntegration = new OnetIntegration(pool);
+    this.agentFactoryService = new AgentFactory(pool);
 
     // Run maintenance every 6 hours
     this.maintenanceTimer = setInterval(
@@ -159,7 +162,7 @@ export class MemoryManager {
       }
     }
 
-    // O*NET role enrichment
+    // O*NET role enrichment (only when onet_enabled setting is true)
     let onetEnrichment = '';
     if (this.pgAvailable) {
       onetEnrichment = await this.onetIntegration
@@ -173,12 +176,31 @@ export class MemoryManager {
       analysis.urgency === 'high',
     );
 
+    // Specialized agent selection and tool pattern retrieval
+    let agentPromptFragment = '';
+    let toolPatternFragment = '';
+    if (this.pgAvailable) {
+      const agent = await this.agentFactoryService
+        .selectAgent(userMessage, analysis.scenarioType)
+        .catch(() => null);
+      if (agent) {
+        agentPromptFragment = this.agentFactoryService.buildAgentPromptFragment(agent);
+      }
+
+      const patterns = await this.agentFactoryService
+        .getRelevantPatterns(analysis.scenarioType, analysis.detectedLanguages, 30, 3)
+        .catch(() => []);
+      toolPatternFragment = this.agentFactoryService.buildPatternFragment(patterns);
+    }
+
     const systemPromptAddition = this.buildSystemPromptAddition(
       analysis,
       selectedMode,
       recentHistory,
       longTermContext,
       onetEnrichment,
+      agentPromptFragment,
+      toolPatternFragment,
     );
 
     return {
@@ -335,6 +357,14 @@ export class MemoryManager {
     return this.personalityLearning;
   }
 
+  get agentFactory(): AgentFactory {
+    return this.agentFactoryService;
+  }
+
+  get ltm(): LongTermMemory {
+    return this.longTermMemory;
+  }
+
   // ──────────────────────────────────────────────────────────────────────────
   // Internal helpers
   // ──────────────────────────────────────────────────────────────────────────
@@ -345,8 +375,14 @@ export class MemoryManager {
     recentHistory: string,
     longTermContext: string,
     onetEnrichment: string,
+    agentPromptFragment: string,
+    toolPatternFragment: string,
   ): string {
     const parts: string[] = [];
+
+    if (agentPromptFragment) {
+      parts.push(agentPromptFragment);
+    }
 
     if (recentHistory) {
       parts.push(`## Recent Conversation\n${recentHistory}`);
@@ -358,6 +394,10 @@ export class MemoryManager {
 
     if (onetEnrichment) {
       parts.push(`## User Role Context\n${onetEnrichment}`);
+    }
+
+    if (toolPatternFragment) {
+      parts.push(toolPatternFragment);
     }
 
     const guidance = SCENARIO_GUIDANCE[analysis.scenarioType];

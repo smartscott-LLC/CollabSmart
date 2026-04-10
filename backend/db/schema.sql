@@ -462,3 +462,266 @@ CREATE INDEX IF NOT EXISTS idx_sr_session   ON session_recordings(session_id);
 CREATE INDEX IF NOT EXISTS idx_sr_started   ON session_recordings(started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sr_user      ON session_recordings(user_id);
 CREATE INDEX IF NOT EXISTS idx_sr_scenarios ON session_recordings USING GIN(scenario_types);
+
+-- ==================================================
+-- USER FEEDBACK
+-- Explicit and implicit ratings to drive learning.
+-- Adapted from memory/database/schema.sql
+-- ==================================================
+CREATE TABLE IF NOT EXISTS user_feedback (
+    id               SERIAL       PRIMARY KEY,
+    session_id       VARCHAR(255) NOT NULL,
+    user_id          VARCHAR(255),
+    feedback_type    VARCHAR(50)  NOT NULL DEFAULT 'explicit',  -- 'explicit', 'implicit'
+    rating           INTEGER      CHECK (rating >= 1 AND rating <= 5),
+    feedback_text    TEXT,
+    scenario_type    VARCHAR(100),
+    response_excerpt TEXT,                  -- brief excerpt of the AI response being rated
+    led_to_solution  BOOLEAN,
+    created_at       TIMESTAMPTZ  DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_uf_session  ON user_feedback(session_id);
+CREATE INDEX IF NOT EXISTS idx_uf_user     ON user_feedback(user_id);
+CREATE INDEX IF NOT EXISTS idx_uf_type     ON user_feedback(feedback_type);
+CREATE INDEX IF NOT EXISTS idx_uf_created  ON user_feedback(created_at DESC);
+
+-- ==================================================
+-- TOOL SUCCESS PATTERNS
+-- "Remembers" which sequences of tools led to good outcomes.
+-- When the AI completes a multi-tool session without error, the tool
+-- sequence + scenario are stored here.  At the start of future sessions
+-- the MemoryManager injects the top-matching patterns into the system
+-- prompt so the AI can reuse proven approaches.
+-- ==================================================
+CREATE TABLE IF NOT EXISTS tool_success_patterns (
+    id                  UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    pattern_name        VARCHAR(255) NOT NULL,
+    scenario_type       VARCHAR(100),
+    tool_sequence       TEXT[]       NOT NULL,       -- ordered list of tool names
+    context_description TEXT         NOT NULL,       -- summary of what the session was about
+    outcome_description TEXT         NOT NULL,       -- what was achieved
+    success_count       INTEGER      DEFAULT 1,
+    failure_count       INTEGER      DEFAULT 0,
+    avg_rating          FLOAT        DEFAULT 0.0,
+    tags                TEXT[]       DEFAULT '{}',
+    programming_languages TEXT[]     DEFAULT '{}',
+    session_id          VARCHAR(255) NOT NULL,
+    user_id             VARCHAR(255),
+    importance_score    FLOAT        DEFAULT 5.0,
+    last_used           TIMESTAMPTZ  DEFAULT NOW(),
+    created_at          TIMESTAMPTZ  DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ  DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_tsp_scenario  ON tool_success_patterns(scenario_type);
+CREATE INDEX IF NOT EXISTS idx_tsp_score     ON tool_success_patterns(importance_score DESC);
+CREATE INDEX IF NOT EXISTS idx_tsp_used      ON tool_success_patterns(last_used DESC);
+CREATE INDEX IF NOT EXISTS idx_tsp_tools     ON tool_success_patterns USING GIN(tool_sequence);
+CREATE INDEX IF NOT EXISTS idx_tsp_tags      ON tool_success_patterns USING GIN(tags);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_tsp_updated_at') THEN
+        CREATE TRIGGER trg_tsp_updated_at
+            BEFORE UPDATE ON tool_success_patterns
+            FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+    END IF;
+END
+$$;
+
+-- ==================================================
+-- SPECIALIZED AGENTS
+-- Domain-expert agent definitions synthesized from O*NET occupation data
+-- and evolved through usage patterns and feedback.
+-- Adapted from memory/agent_factory/schema_agent_factory.sql.
+-- ==================================================
+CREATE TABLE IF NOT EXISTS specialized_agents (
+    id                    UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    agent_code            VARCHAR(100) NOT NULL UNIQUE,
+    agent_name            VARCHAR(255) NOT NULL,
+    description           TEXT         NOT NULL,
+    specialization_domain VARCHAR(255) NOT NULL,
+
+    -- O*NET occupation codes this agent synthesises knowledge from
+    source_occupation_codes VARCHAR(10)[] DEFAULT '{}',
+
+    -- Synthesised capabilities (JSONB for flexibility and GIN indexing)
+    capabilities          JSONB        NOT NULL DEFAULT '{}'::jsonb,
+    -- { "knowledge_domains": [...], "skills": [...], "abilities": [...] }
+
+    -- System-prompt fragment injected when this agent is activated
+    system_prompt_template TEXT         NOT NULL,
+
+    -- Rules that govern when this agent should be delegated to
+    delegation_rules      JSONB        NOT NULL DEFAULT '{}'::jsonb,
+    -- { "trigger_keywords": [...], "scenario_types": [...], "complexity_threshold": 0.7 }
+
+    -- Performance tracking
+    total_invocations     INTEGER      DEFAULT 0,
+    successful_invocations INTEGER     DEFAULT 0,
+    avg_confidence_score  FLOAT        DEFAULT 0.0,
+    avg_user_rating       FLOAT        DEFAULT 0.0,
+
+    is_active             BOOLEAN      DEFAULT TRUE,
+    created_by            VARCHAR(100) DEFAULT 'system',
+    last_invoked_at       TIMESTAMPTZ,
+    created_at            TIMESTAMPTZ  DEFAULT NOW(),
+    updated_at            TIMESTAMPTZ  DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sa_code       ON specialized_agents(agent_code);
+CREATE INDEX IF NOT EXISTS idx_sa_domain            ON specialized_agents(specialization_domain);
+CREATE INDEX IF NOT EXISTS idx_sa_active            ON specialized_agents(is_active) WHERE is_active = TRUE;
+CREATE INDEX IF NOT EXISTS idx_sa_invocations       ON specialized_agents(total_invocations DESC);
+CREATE INDEX IF NOT EXISTS idx_sa_capabilities      ON specialized_agents USING GIN(capabilities);
+CREATE INDEX IF NOT EXISTS idx_sa_delegation        ON specialized_agents USING GIN(delegation_rules);
+CREATE INDEX IF NOT EXISTS idx_sa_occ_codes         ON specialized_agents USING GIN(source_occupation_codes);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_sa_updated_at') THEN
+        CREATE TRIGGER trg_sa_updated_at
+            BEFORE UPDATE ON specialized_agents
+            FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+    END IF;
+END
+$$;
+
+-- Seed the default CollabSmart specialized agents
+INSERT INTO specialized_agents (
+    agent_code, agent_name, description, specialization_domain,
+    source_occupation_codes, capabilities, system_prompt_template, delegation_rules, created_by
+) VALUES
+(
+    'code_architect',
+    'Software Architecture Expert',
+    'Designs scalable system architectures, evaluates technology trade-offs, and guides high-level code structure decisions.',
+    'software_architecture',
+    ARRAY['15-1252.00','15-1211.00'],
+    '{"knowledge_domains":[{"domain":"Software Design Patterns","importance":5.0},{"domain":"Distributed Systems","importance":4.8},{"domain":"API Design","importance":4.5}],"skills":[{"skill":"Systems Thinking","level":5.0},{"skill":"Technical Communication","level":4.5}]}'::jsonb,
+    'You are a Software Architecture Expert. Focus on scalability, maintainability, and long-term system health. Always surface trade-offs. Think in terms of bounded contexts, data flow, and failure modes. When reviewing architecture, ask: "How does this behave under load? How does it fail gracefully? How will it evolve?"',
+    '{"trigger_keywords":["architecture","system design","scalability","microservice","monolith","api design","database design","trade-off"],"scenario_types":["architecture"],"complexity_threshold":0.6}'::jsonb,
+    'system'
+),
+(
+    'debugger',
+    'Debugging and Root-Cause Analysis Expert',
+    'Diagnoses bugs methodically, interprets stack traces, and guides systematic root-cause analysis.',
+    'debugging',
+    ARRAY['15-1252.00'],
+    '{"knowledge_domains":[{"domain":"Debugging Techniques","importance":5.0},{"domain":"Error Analysis","importance":5.0},{"domain":"Runtime Behaviour","importance":4.5}],"skills":[{"skill":"Root Cause Analysis","level":5.0},{"skill":"Hypothesis Testing","level":4.8}]}'::jsonb,
+    'You are a Debugging Expert. Approach every bug as a detective — form a hypothesis, design a minimal test, eliminate candidates, confirm root cause. Always ask for the full error message, stack trace, and the smallest reproducer. Never guess; measure.',
+    '{"trigger_keywords":["error","bug","exception","crash","stacktrace","not working","failing","undefined","null"],"scenario_types":["debugging"],"complexity_threshold":0.4}'::jsonb,
+    'system'
+),
+(
+    'security_analyst',
+    'Security and Vulnerability Expert',
+    'Identifies security vulnerabilities, recommends hardening strategies, and enforces secure coding practices.',
+    'security',
+    ARRAY['15-1212.00'],
+    '{"knowledge_domains":[{"domain":"OWASP Top 10","importance":5.0},{"domain":"Cryptography","importance":4.5},{"domain":"Authentication & Authorization","importance":5.0}],"skills":[{"skill":"Threat Modelling","level":5.0},{"skill":"Penetration Testing","level":4.5}]}'::jsonb,
+    'You are a Security Expert. Apply defence-in-depth to every recommendation. Check for injection vulnerabilities, authentication flaws, insecure defaults, and over-privileged access. Reference CVEs where relevant. Validate all inputs, enforce least privilege, and surface secrets in code immediately.',
+    '{"trigger_keywords":["security","vulnerability","injection","xss","csrf","auth","token","encrypt","sanitize","cve","secret","credential"],"scenario_types":["security"],"complexity_threshold":0.3}'::jsonb,
+    'system'
+),
+(
+    'devops_engineer',
+    'DevOps and CI/CD Expert',
+    'Guides containerisation, CI/CD pipelines, infrastructure-as-code, and deployment strategies.',
+    'devops',
+    ARRAY['15-1244.00'],
+    '{"knowledge_domains":[{"domain":"Docker & Kubernetes","importance":5.0},{"domain":"CI/CD Pipelines","importance":5.0},{"domain":"Infrastructure as Code","importance":4.5}],"skills":[{"skill":"Container Orchestration","level":5.0},{"skill":"Pipeline Design","level":4.8}]}'::jsonb,
+    'You are a DevOps Expert. Work through deployment changes systematically: build → test → stage → production. Verify each gate before moving forward. For container issues, always check logs first. Prefer idempotent infrastructure-as-code changes. Rollback plans are not optional.',
+    '{"trigger_keywords":["deploy","ci","cd","pipeline","docker","kubernetes","helm","terraform","github actions","build fails","rollback"],"scenario_types":["deployment"],"complexity_threshold":0.4}'::jsonb,
+    'system'
+),
+(
+    'code_reviewer',
+    'Code Quality and Review Expert',
+    'Reviews code for quality, consistency, and best practices; provides actionable, constructive feedback.',
+    'code_review',
+    ARRAY['15-1252.00'],
+    '{"knowledge_domains":[{"domain":"Clean Code","importance":5.0},{"domain":"Design Patterns","importance":4.5},{"domain":"Code Smells","importance":4.8}],"skills":[{"skill":"Critical Analysis","level":5.0},{"skill":"Constructive Feedback","level":5.0}]}'::jsonb,
+    'You are a Code Review Expert. Lead with strengths before improvements. Reference concrete patterns and principles (SOLID, DRY, YAGNI). For each issue, explain *why* it matters and suggest a specific fix. Distinguish between must-fix issues and optional polish. Keep reviews actionable.',
+    '{"trigger_keywords":["review","feedback","improve","best practice","code quality","linting","readability","smell","refactor"],"scenario_types":["code_review","refactoring"],"complexity_threshold":0.4}'::jsonb,
+    'system'
+),
+(
+    'performance_optimizer',
+    'Performance Analysis and Optimisation Expert',
+    'Profiles bottlenecks, interprets metrics, and recommends targeted performance improvements.',
+    'performance',
+    ARRAY['15-1252.00'],
+    '{"knowledge_domains":[{"domain":"Profiling Techniques","importance":5.0},{"domain":"Database Query Optimisation","importance":4.8},{"domain":"Caching Strategies","importance":4.5}],"skills":[{"skill":"Benchmarking","level":5.0},{"skill":"Data-Driven Analysis","level":5.0}]}'::jsonb,
+    'You are a Performance Optimisation Expert. Profile before you optimise — never guess at bottlenecks. Establish a baseline, then measure the impact of each change. Consider algorithmic complexity first, then I/O, then memory, then CPU. Cache invalidation and N+1 queries are common culprits.',
+    '{"trigger_keywords":["performance","slow","optimize","bottleneck","latency","memory leak","benchmark","n+1","cache","throughput"],"scenario_types":["performance"],"complexity_threshold":0.5}'::jsonb,
+    'system'
+),
+(
+    'teacher',
+    'Technical Teaching and Mentorship Expert',
+    'Explains complex technical concepts clearly, builds understanding step-by-step, and adapts to the learner''s level.',
+    'teaching',
+    ARRAY['25-1194.00'],
+    '{"knowledge_domains":[{"domain":"Pedagogy","importance":5.0},{"domain":"Technical Communication","importance":5.0}],"skills":[{"skill":"Adaptive Explanation","level":5.0},{"skill":"Socratic Questioning","level":4.5}]}'::jsonb,
+    'You are a Technical Teaching Expert. Build understanding step by step — never skip foundations. Use concrete examples, analogies, and diagrams (ASCII art when helpful). Check comprehension before moving on. Celebrate progress. If a concept is not landing, try a different angle. Patience is not optional.',
+    '{"trigger_keywords":["how do i","how to","explain","what is","teach me","show me","first time","new to","understand","tutorial","learning"],"scenario_types":["learning","documentation"],"complexity_threshold":0.2}'::jsonb,
+    'system'
+)
+ON CONFLICT (agent_code) DO UPDATE
+    SET description           = EXCLUDED.description,
+        system_prompt_template = EXCLUDED.system_prompt_template,
+        delegation_rules       = EXCLUDED.delegation_rules,
+        capabilities           = EXCLUDED.capabilities,
+        updated_at             = NOW();
+
+-- ==================================================
+-- AGENT INVOCATIONS
+-- Per-interaction audit log for agent delegation.
+-- Drives the learning loop that improves agent selection over time.
+-- Adapted from memory/agent_factory/schema_agent_factory.sql.
+-- ==================================================
+CREATE TABLE IF NOT EXISTS agent_invocations (
+    id                     UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    agent_id               UUID         REFERENCES specialized_agents(id) ON DELETE CASCADE,
+    session_id             VARCHAR(255) NOT NULL,
+    user_id                VARCHAR(255),
+    invoked_at             TIMESTAMPTZ  DEFAULT NOW(),
+    user_query             TEXT         NOT NULL,
+    tool_used              VARCHAR(100),
+    tool_input             JSONB,
+    tool_output_excerpt    TEXT,                   -- first 500 chars of tool output
+    was_successful         BOOLEAN,
+    processing_time_ms     INTEGER,
+    delegation_confidence  FLOAT        DEFAULT 0.0,
+    delegation_reason      TEXT,
+    user_rating            INTEGER      CHECK (user_rating >= 1 AND user_rating <= 5),
+    scenario_type          VARCHAR(100),
+    related_memory_id      UUID         REFERENCES long_term_memory(id) ON DELETE SET NULL,
+    created_at             TIMESTAMPTZ  DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_agent     ON agent_invocations(agent_id);
+CREATE INDEX IF NOT EXISTS idx_ai_session   ON agent_invocations(session_id);
+CREATE INDEX IF NOT EXISTS idx_ai_invoked   ON agent_invocations(invoked_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ai_success   ON agent_invocations(was_successful);
+CREATE INDEX IF NOT EXISTS idx_ai_scenario  ON agent_invocations(scenario_type);
+
+-- ==================================================
+-- NEW APP SETTINGS
+-- Add entries for features introduced in this schema version.
+-- ==================================================
+INSERT INTO app_settings (key, value, description) VALUES
+    ('onet_enabled', 'false',
+        'Enable O*NET occupation data enrichment in AI context (requires ONET_USERNAME and ONET_PASSWORD)'),
+    ('agent_factory_enabled', 'true',
+        'Enable the Specialized Agent Factory — injects domain-expert system-prompt fragments per scenario'),
+    ('tool_pattern_memory_enabled', 'true',
+        'Remember and replay successful tool-use sequences across sessions'),
+    ('max_tool_pattern_age_days', '30',
+        'Discard tool success patterns older than this many days (0 = never discard)'),
+    ('feedback_collection_enabled', 'true',
+        'Accept explicit user feedback ratings via the /api/feedback endpoint')
+ON CONFLICT (key) DO UPDATE SET description = EXCLUDED.description;

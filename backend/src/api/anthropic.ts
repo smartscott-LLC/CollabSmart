@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { Socket } from 'socket.io';
 import logger from '../logger';
-import { TOOL_DEFINITIONS, dispatchTool } from '../tools';
+import { TOOL_DEFINITIONS, dispatchTool, ToolContext } from '../tools';
 import { broadcastLog } from '../orchestrator';
 import { MemoryManager } from '../memory';
 import { getSetting } from '../settings';
@@ -55,21 +55,38 @@ function emitAILog(message: string, model: string, type = 'ai'): void {
 
 const CORE_SYSTEM_PROMPT = `You are an AI pair programmer working inside a shared containerized Linux environment (CollabSmart).
 You have access to a live workspace directory where both you and the user can read and write files, run commands, and observe processes.
+You are a co-worker, not a tool — think, explore, suggest, and build alongside the human as an equal collaborator.
 
 You have the following tools available:
-- bash: Execute shell commands in the workspace
+
+Workspace tools:
+- bash: Execute shell commands in the workspace (30 s timeout)
 - file_write: Write files to the workspace
 - file_read: Read files from the workspace
+- file_list: List files and directories in the workspace
+- file_search: Search file contents with a literal pattern (like grep)
 - process_monitor: Check running processes
 - log_tail: Tail log files in the workspace
+
+Version control tools (operate on the workspace git repo):
+- git_status: Show which files are changed/staged/untracked
+- git_diff: Show diff of current changes
+- git_log: Show recent commit history
+- git_commit: Stage all changes and commit (only when user requests)
+
+Memory tools (your persistent memory across sessions):
+- memory_recall: Search your long-term memory for relevant concepts and lessons
+- memory_store: Store an important concept or pattern to long-term memory for future sessions
 
 Guidelines:
 - Always explain what you are doing before executing commands
 - Show the user what you observe in the environment
 - Prefer making incremental, verifiable changes
 - Report errors clearly and suggest fixes
-- Keep the user in control - they can stop you at any time
-- All your actions are visible to the user in real-time`;
+- Keep the user in control — they can stop you at any time
+- All your actions are visible to the user in real-time
+- Use memory_recall at the start of complex tasks to check for relevant past learnings
+- Use memory_store when you discover something reusable that should persist across sessions`;
 
 export async function processChat(
   sessionId: string,
@@ -83,9 +100,21 @@ export async function processChat(
   // Read runtime settings (DB-backed, cached 60 s, env-var fallback)
   const model = await getSetting('ai_model', DEFAULT_MODEL);
   const maxTokens = parseInt(await getSetting('ai_max_tokens', String(DEFAULT_MAX_TOKENS)), 10);
+  const toolPatternEnabled = await getSetting('tool_pattern_memory_enabled', 'true');
+  const maxPatternAgeDays = parseInt(await getSetting('max_tool_pattern_age_days', '30'), 10);
 
   // Analyse context and retrieve tiered memory before calling Claude
   const enrichedContext = await memory.analyzeAndRetrieve(sessionId, userMessage, userId);
+
+  // Build tool context so memory tools can access LTM
+  const toolCtx: ToolContext = {
+    sessionId,
+    userId,
+    recallLongTermMemory: (scenarioType, entities) =>
+      memory.ltm.retrieveRelevant(scenarioType, entities, 5),
+    storeLongTermMemory: (concept, summary, entities, scenarios) =>
+      memory.ltm.storeFoundationMemory(concept, summary, entities, scenarios),
+  };
 
   conversation.history.push({ role: 'user', content: userMessage });
 
@@ -99,6 +128,7 @@ export async function processChat(
   }));
 
   let finalResponse = '';
+  const toolSequenceUsed: string[] = []; // track tool calls in this turn
 
   try {
     let continueLoop = true;
@@ -126,19 +156,51 @@ export async function processChat(
             finalResponse += block.text;
             emitAILog(block.text, model, 'text');
           } else if (block.type === 'tool_use') {
+            const startTime = Date.now();
             emitAILog(`Using tool: ${block.name}`, model, 'tool-call');
             socket.emit('tool:start', { name: block.name, input: block.input });
 
             const result = await dispatchTool(
               block.name,
               block.input as Record<string, unknown>,
+              toolCtx,
             );
+
+            const processingMs = Date.now() - startTime;
+            toolSequenceUsed.push(block.name);
 
             socket.emit('tool:result', {
               name: block.name,
               success: result.success,
               output: result.output || result.error,
             });
+
+            // Record invocation in agent factory (best-effort)
+            const agentFactoryEnabled = await getSetting('agent_factory_enabled', 'true');
+            if (agentFactoryEnabled === 'true') {
+              const agent = await memory.agentFactory
+                .selectAgent(userMessage, enrichedContext.analysis.scenarioType)
+                .catch(() => null);
+
+              await memory.agentFactory
+                .recordInvocation({
+                  agentId: agent?.id,
+                  sessionId,
+                  userId,
+                  userQuery: userMessage,
+                  toolUsed: block.name,
+                  toolInput: block.input as Record<string, unknown>,
+                  toolOutputExcerpt: result.output ?? result.error,
+                  wasSuccessful: result.success,
+                  processingTimeMs: processingMs,
+                  delegationConfidence: agent ? 0.8 : 0.0,
+                  delegationReason: agent
+                    ? `Scenario match: ${enrichedContext.analysis.scenarioType}`
+                    : 'No agent matched',
+                  scenarioType: enrichedContext.analysis.scenarioType,
+                })
+                .catch(() => {});
+            }
 
             toolResults.push({
               type: 'tool_result',
@@ -170,6 +232,31 @@ export async function processChat(
       enrichedContext.analysis,
       userId,
     );
+
+    // Store successful tool-use pattern if any tools were used
+    if (toolPatternEnabled === 'true' && toolSequenceUsed.length > 0) {
+      const contextDesc = userMessage.length > 200
+        ? userMessage.slice(0, 197) + '...'
+        : userMessage;
+      const outcomeDesc = finalResponse.length > 200
+        ? finalResponse.slice(0, 197) + '...'
+        : finalResponse;
+
+      await memory.agentFactory
+        .storeSuccessPattern(
+          sessionId,
+          userId,
+          toolSequenceUsed,
+          enrichedContext.analysis.scenarioType,
+          contextDesc,
+          outcomeDesc,
+          enrichedContext.analysis.detectedLanguages,
+          enrichedContext.importanceScore,
+        )
+        .catch((e) => logger.warn('[processChat] storeSuccessPattern failed', {
+          error: e instanceof Error ? e.message : String(e),
+        }));
+    }
 
     return finalResponse;
   } catch (err: unknown) {
