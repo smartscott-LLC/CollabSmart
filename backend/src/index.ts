@@ -6,7 +6,7 @@ import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import logger from './logger';
 import { initOrchestrator } from './orchestrator';
 import { processChat, clearConversation, getConversation } from './api/anthropic';
@@ -55,14 +55,17 @@ app.get('/health', (_req, res) => {
 
 // ── Resource metrics ───────────────────────────────────────────────────────
 
-app.get('/api/health/resources', (_req, res) => {
+app.get('/api/health/resources', apiRateLimit, (_req, res) => {
   const totalMem = os.totalmem();
   const freeMem = os.freemem();
 
   let diskInfo = { total: 0, used: 0, available: 0, path: WORKSPACE_PATH };
   try {
-    const dfLine = execSync(`df -k "${WORKSPACE_PATH}" | tail -1`).toString().trim();
-    const parts = dfLine.split(/\s+/);
+    // execFileSync with an array avoids shell injection; the last non-header line is the data row
+    const dfOutput = execFileSync('df', ['-k', WORKSPACE_PATH]).toString();
+    const lines = dfOutput.trim().split('\n');
+    const dataLine = lines[lines.length - 1] ?? '';
+    const parts = dataLine.split(/\s+/);
     diskInfo = {
       path: WORKSPACE_PATH,
       total: parseInt(parts[1], 10) * 1024,
@@ -70,7 +73,7 @@ app.get('/api/health/resources', (_req, res) => {
       available: parseInt(parts[3], 10) * 1024,
     };
   } catch {
-    // df not available (e.g. non-Linux dev env)
+    // df not available (e.g. non-Linux dev env) — leave zeros
   }
 
   res.json({
@@ -94,7 +97,7 @@ app.get('/api/health/resources', (_req, res) => {
 
 // ── Settings ───────────────────────────────────────────────────────────────
 
-app.get('/api/settings', async (_req, res) => {
+app.get('/api/settings', apiRateLimit, async (_req, res) => {
   try {
     const rows = await getAllSettingsWithMeta();
     res.json(rows);
@@ -104,7 +107,7 @@ app.get('/api/settings', async (_req, res) => {
   }
 });
 
-app.put('/api/settings/:key', async (req, res) => {
+app.put('/api/settings/:key', apiRateLimit, async (req, res) => {
   const { key } = req.params;
   const { value } = req.body as { value?: string };
 
@@ -131,7 +134,7 @@ app.delete('/api/conversation/:sessionId', (req, res) => {
 
 // ── Session Recordings ─────────────────────────────────────────────────────
 
-app.get('/api/recordings', async (_req, res) => {
+app.get('/api/recordings', apiRateLimit, async (_req, res) => {
   try {
     const pool = getPgPool();
     const result = await pool.query(
@@ -148,7 +151,7 @@ app.get('/api/recordings', async (_req, res) => {
   }
 });
 
-app.get('/api/recordings/:id', async (req, res) => {
+app.get('/api/recordings/:id', apiRateLimit, async (req, res) => {
   try {
     const pool = getPgPool();
     const result = await pool.query(
@@ -166,7 +169,7 @@ app.get('/api/recordings/:id', async (req, res) => {
   }
 });
 
-app.delete('/api/recordings/:id', async (req, res) => {
+app.delete('/api/recordings/:id', apiRateLimit, async (req, res) => {
   try {
     const pool = getPgPool();
     await pool.query('DELETE FROM session_recordings WHERE id = $1', [req.params.id]);
@@ -197,6 +200,29 @@ function isRateLimited(ip: string): boolean {
   if (entry.count >= 20) return true;
   entry.count += 1;
   return false;
+}
+
+// General API rate limiter (60 requests / IP / minute)
+const apiRateMap = new Map<string, { count: number; resetAt: number }>();
+function isApiRateLimited(ip: string): boolean {
+  const now = Date.now();
+  const entry = apiRateMap.get(ip);
+  if (!entry || now > entry.resetAt) {
+    apiRateMap.set(ip, { count: 1, resetAt: now + 60_000 });
+    return false;
+  }
+  if (entry.count >= 60) return true;
+  entry.count += 1;
+  return false;
+}
+
+function apiRateLimit(req: express.Request, res: express.Response, next: express.NextFunction): void {
+  const ip = req.ip ?? req.socket.remoteAddress ?? 'unknown';
+  if (isApiRateLimited(ip)) {
+    res.status(429).json({ error: 'Too many requests. Please slow down.' });
+    return;
+  }
+  next();
 }
 
 app.post('/api/upload', (req, res) => {
@@ -270,8 +296,7 @@ async function saveSessionRecording(sessionId: string, startedAt: Date): Promise
     const durationSeconds = Math.round((endedAt.getTime() - startedAt.getTime()) / 1000);
     const title = `Session ${sessionId.slice(0, 8)} — ${endedAt.toLocaleString()}`;
 
-    const messages = conv.history.map((m, i) => ({
-      index: i,
+    const messages = conv.history.map((m) => ({
       role: m.role,
       content: m.content,
     }));

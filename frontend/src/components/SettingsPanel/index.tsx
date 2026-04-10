@@ -33,7 +33,7 @@ interface Recording {
 }
 
 interface RecordingDetail extends Recording {
-  messages: { index: number; role: string; content: string }[];
+  messages: { role: string; content: string }[];
 }
 
 type Tab = 'ai' | 'memory' | 'session' | 'resources';
@@ -218,7 +218,7 @@ function AITab({
 
       <SettingRow
         label="Model"
-        description={settings['ai_model'] ? `Current: ${settings['ai_model']}` : undefined}
+        description="Model used for all AI responses. Changes take effect on the next message."
       >
         <div className="flex items-center gap-2">
           <SelectInput
@@ -295,10 +295,15 @@ function MemoryTab({
     setDfMemory(settings['dragonfly_max_memory'] ?? '512mb');
   }, [settings]);
 
+  const ttlDisplay = settings['working_memory_ttl_hours'] ?? '48';
+  const t2Start = parseInt(ttlDisplay, 10);
+  const t3Start = t2Start * 2;
+  const ltmStart = Math.round(t3Start * 1.5);
+
   return (
     <div>
       <p className="text-xs text-gray-500 mb-3">
-        Memory architecture: Dragonfly (0–48 h) → PostgreSQL short-term (48–96 h) → archive (96–144 h) → long-term (permanent).
+        Memory architecture: Dragonfly (0–{ttlDisplay} h) → PostgreSQL short-term ({ttlDisplay}–{t2Start * 2} h) → archive ({t3Start}–{ltmStart} h) → long-term (permanent).
       </p>
 
       <SettingRow
@@ -447,9 +452,9 @@ function SessionTab({
             </button>
           </div>
           <div className="flex-1 overflow-y-auto max-h-72 border border-sharp-border rounded p-2 space-y-2">
-            {replayRec.messages.map((m) => (
+            {replayRec.messages.map((m, i) => (
               <div
-                key={m.index}
+                key={i}
                 className={`text-xs font-mono whitespace-pre-wrap break-words p-2 rounded ${
                   m.role === 'user'
                     ? 'bg-sharp-user/10 border border-sharp-user/20 text-sharp-text'

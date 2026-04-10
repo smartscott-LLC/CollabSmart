@@ -426,7 +426,7 @@ INSERT INTO app_settings (key, value, description) VALUES
         'Maximum tokens the AI may generate per response (256–8192)'),
     ('dragonfly_max_memory', '512mb',
         'Dragonfly maximum memory allocation (e.g. 256mb, 1gb)')
-ON CONFLICT (key) DO NOTHING;
+ON CONFLICT (key) DO UPDATE SET description = EXCLUDED.description;
 
 DO $$
 BEGIN
