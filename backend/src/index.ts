@@ -132,6 +132,80 @@ app.delete('/api/conversation/:sessionId', (req, res) => {
   res.json({ success: true });
 });
 
+// ── User Feedback ──────────────────────────────────────────────────────────
+
+app.post('/api/feedback', apiRateLimit, async (req, res) => {
+  const feedbackEnabled = await getSetting('feedback_collection_enabled', 'true').catch(() => 'true');
+  if (feedbackEnabled !== 'true') {
+    res.status(403).json({ error: 'Feedback collection is disabled' });
+    return;
+  }
+
+  interface FeedbackBody {
+    sessionId?: string;
+    userId?: string;
+    rating?: number;
+    feedbackText?: string;
+    scenarioType?: string;
+    responseExcerpt?: string;
+    ledToSolution?: boolean;
+  }
+  const { sessionId, userId, rating, feedbackText, scenarioType, responseExcerpt, ledToSolution } =
+    req.body as FeedbackBody;
+
+  if (!sessionId || !rating || rating < 1 || rating > 5) {
+    res.status(400).json({ error: 'sessionId and rating (1-5) are required' });
+    return;
+  }
+
+  try {
+    await memory.agentFactory.recordFeedback(
+      sessionId,
+      userId,
+      rating,
+      feedbackText,
+      scenarioType ?? 'general',
+      responseExcerpt,
+      ledToSolution,
+    );
+    res.json({ success: true });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
+});
+
+// ── Agents ─────────────────────────────────────────────────────────────────
+
+app.get('/api/agents', apiRateLimit, async (_req, res) => {
+  try {
+    const agents = await memory.agentFactory.getActiveAgents();
+    res.json(agents);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
+});
+
+// ── Tool Success Patterns ──────────────────────────────────────────────────
+
+app.get('/api/patterns', apiRateLimit, async (req, res) => {
+  try {
+    const scenarioType = (req.query.scenario as string | undefined) ?? 'general';
+    const maxAgeDays = parseInt((req.query.maxAge as string | undefined) ?? '30', 10);
+    const patterns = await memory.agentFactory.getRelevantPatterns(
+      scenarioType,
+      [],
+      maxAgeDays,
+      20,
+    );
+    res.json(patterns);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
+});
+
 // ── Session Recordings ─────────────────────────────────────────────────────
 
 app.get('/api/recordings', apiRateLimit, async (_req, res) => {
