@@ -5,6 +5,7 @@ import { TOOL_DEFINITIONS, dispatchTool, ToolContext } from '../tools';
 import { broadcastLog } from '../orchestrator';
 import { MemoryManager } from '../memory';
 import { getSetting } from '../settings';
+import { linaGetContext, linaEvaluate } from './lina';
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || '',
@@ -118,9 +119,15 @@ export async function processChat(
 
   conversation.history.push({ role: 'user', content: userMessage });
 
+  // Attempt to get LINA's identity-aware system prompt.
+  // Falls back to the flat CORE_SYSTEM_PROMPT if LINA is unavailable.
+  const effectiveUserId = userId ?? sessionId;
+  const linaCtx = await linaGetContext(effectiveUserId);
+  const basePrompt = linaCtx?.system_prompt ?? CORE_SYSTEM_PROMPT;
+
   const systemPrompt = enrichedContext.systemPromptAddition
-    ? `${CORE_SYSTEM_PROMPT}\n\n${enrichedContext.systemPromptAddition}`
-    : CORE_SYSTEM_PROMPT;
+    ? `${basePrompt}\n\n${enrichedContext.systemPromptAddition}`
+    : basePrompt;
 
   const messages: Anthropic.MessageParam[] = conversation.history.map((m) => ({
     role: m.role,
@@ -223,6 +230,22 @@ export async function processChat(
 
     conversation.history.push({ role: 'assistant', content: finalResponse });
     emitAILog(finalResponse, model, 'response');
+
+    // Run LINA's value engine on the final response (non-blocking)
+    void linaEvaluate(effectiveUserId, sessionId, finalResponse, userMessage).then(
+      (evaluation) => {
+        if (evaluation && !evaluation.is_aligned) {
+          logger.warn('[LINA] response outside polytope', {
+            sessionId,
+            alignment_score: evaluation.alignment_score,
+            violations: evaluation.violations.map((v) => v.name),
+          });
+        }
+        if (evaluation?.wisdom.overconfidence) {
+          logger.info('[LINA] overconfidence detected in response', { sessionId });
+        }
+      },
+    );
 
     // Persist the completed interaction across all memory tiers
     await memory.storeInteraction(

@@ -10,6 +10,7 @@ import { execFileSync } from 'child_process';
 import logger from './logger';
 import { initOrchestrator } from './orchestrator';
 import { processChat, clearConversation, getConversation } from './api/anthropic';
+import { linaInit, linaSessionStart, linaSessionEnd } from './api/lina';
 import { getPgPool, getRedisClient, initSchema, closePools } from './db/pool';
 import { MemoryManager } from './memory';
 import { getAllSettingsWithMeta, getSetting, setSetting } from './settings';
@@ -404,11 +405,24 @@ async function saveSessionRecording(sessionId: string, startedAt: Date): Promise
 initOrchestrator(io, saveSessionRecording);
 
 io.on('connection', (socket) => {
+  // Track userId per socket for LINA session end
+  let socketUserId: string | undefined;
+
   socket.on('chat:message', async (data: { sessionId: string; message: string; userId?: string }) => {
     const { sessionId, message, userId } = data;
     if (!sessionId || !message) {
       socket.emit('chat:error', { error: 'Missing sessionId or message' });
       return;
+    }
+
+    // Wire LINA on the first message of a session
+    const effectiveUserId = userId ?? sessionId;
+    if (!socketUserId) {
+      socketUserId = effectiveUserId;
+      // Fire-and-forget: init + session start (non-blocking)
+      void linaInit(effectiveUserId).then(() =>
+        linaSessionStart(effectiveUserId, sessionId)
+      );
     }
 
     try {
@@ -419,6 +433,16 @@ io.on('connection', (socket) => {
       const error = err instanceof Error ? err.message : String(err);
       logger.error(`Chat error: ${error}`);
       socket.emit('chat:error', { error });
+    }
+  });
+
+  socket.on('disconnect', () => {
+    // Trigger LINA memory formation on disconnect
+    if (socketUserId) {
+      const sessionId = (socket as { sessionId?: string }).sessionId;
+      if (sessionId) {
+        void linaSessionEnd(socketUserId, sessionId);
+      }
     }
   });
 });

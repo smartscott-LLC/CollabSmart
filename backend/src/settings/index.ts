@@ -25,7 +25,7 @@ const ENV_DEFAULTS: Record<string, string> = {
   log_level: process.env.LOG_LEVEL ?? 'info',
   ai_model: process.env.AI_MODEL ?? 'claude-haiku-4-5-20251001',
   ai_max_tokens: process.env.AI_MAX_TOKENS ?? '4096',
-  dragonfly_max_memory: process.env.DRAGONFLY_MAX_MEMORY ?? '512mb',
+  dragonfly_max_memory: process.env.DRAGONFLY_MAX_MEMORY ?? '2gb',
 };
 
 let cache: Record<string, string> | null = null;

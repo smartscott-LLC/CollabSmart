@@ -9,6 +9,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./backend/db/schema.sql:/docker-entrypoint-initdb.d/00-schema.sql:ro
+      - ../LINA/lina_schema.sql:/docker-entrypoint-initdb.d/01-lina-schema.sql:ro
     ports:
       - "5432:5432"
     networks:
@@ -74,6 +75,34 @@ services:
       timeout: 5s
       retries: 5
 
+  lina:
+    build:
+      context: ../LINA
+      dockerfile: Dockerfile
+    container_name: collabsmart-lina
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-collabsmart}:${POSTGRES_PASSWORD:-collabsmart}@postgres:5432/${POSTGRES_DB:-collabsmart}
+      - REDIS_URL=redis://:${DRAGONFLY_PASSWORD:-dragonfly_secret}@dragonfly:6379
+      - LINA_MODEL=${LINA_MODEL:-claude-sonnet-4-6}
+      - LINA_MAX_TOKENS=${LINA_MAX_TOKENS:-1024}
+      - LINA_LOG_LEVEL=${LOG_LEVEL:-info}
+    ports:
+      - "8001:8001"
+    networks:
+      - collabsmart
+    depends_on:
+      postgres:
+        condition: service_healthy
+      dragonfly:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/lina/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
   backend:
     build:
       context: ./backend
@@ -107,6 +136,7 @@ services:
       - SESSION_TIMEOUT_MINUTES=${SESSION_TIMEOUT_MINUTES:-30}
       - MAX_CONVERSATION_HISTORY=${MAX_CONVERSATION_HISTORY:-100}
       - LOG_LEVEL=${LOG_LEVEL:-info}
+      - LINA_SERVICE_URL=http://lina:8001
     volumes:
       - workspace:/workspace
     ports:
@@ -119,6 +149,8 @@ services:
       postgres:
         condition: service_healthy
       dragonfly:
+        condition: service_healthy
+      lina:
         condition: service_healthy
     restart: unless-stopped
 
