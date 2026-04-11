@@ -51,18 +51,6 @@ export function initOrchestrator(
     });
   });
 
-  // Clean up stale sessions every 5 minutes
-  setInterval(() => {
-    const now = new Date();
-    for (const [id, session] of sessions.entries()) {
-      const idleMs = now.getTime() - session.lastActivity.getTime();
-      if (idleMs > 30 * 60 * 1000) {
-        session.socket.disconnect(true);
-        sessions.delete(id);
-        logger.info(`Cleaned up stale session: ${id}`);
-      }
-    }
-  }, 5 * 60 * 1000);
 }
 
 export function getActiveSessions(): Session[] {

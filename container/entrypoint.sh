@@ -9,6 +9,13 @@ VNC_PASSWORD=${VNC_PASSWORD:-collabsmart_vnc}
 
 echo "[entrypoint] Starting CollabSmart container..."
 
+# Start the D-Bus system daemon (required by XFCE4 settings daemon)
+if [ ! -d /run/dbus ]; then
+  mkdir -p /run/dbus
+fi
+dbus-daemon --system --fork || true
+echo "[entrypoint] D-Bus system daemon started"
+
 # Set VNC password from environment variable
 mkdir -p /home/${USER}/.vnc
 printf '%s' "${VNC_PASSWORD}" | vncpasswd -f > /home/${USER}/.vnc/passwd

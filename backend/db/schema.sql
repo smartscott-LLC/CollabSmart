@@ -414,8 +414,6 @@ INSERT INTO app_settings (key, value, description) VALUES
         'Importance score (0.0–10.0) required to promote a memory to long-term storage'),
     ('working_memory_ttl_hours', '48',
         'Hours before Dragonfly working-memory entries expire'),
-    ('session_timeout_minutes', '30',
-        'Minutes of inactivity before a session is automatically disconnected'),
     ('max_conversation_history', '100',
         'Maximum in-memory conversation turns kept per session'),
     ('log_level', 'info',
