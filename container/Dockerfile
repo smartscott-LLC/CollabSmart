@@ -1,4 +1,4 @@
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV DISPLAY=:1
@@ -11,6 +11,8 @@ ENV AI_USER=ai-agent
 RUN apt-get update && apt-get install -y \
     # Desktop environment
     xfce4 xfce4-terminal \
+    # D-Bus (required for XFCE4 settings daemon)
+    dbus-x11 dbus \
     # VNC server
     tigervnc-standalone-server tigervnc-common \
     # noVNC dependencies
@@ -24,7 +26,7 @@ RUN apt-get update && apt-get install -y \
     # Utilities
     sudo bash vim nano \
     # Browser for web-based dev
-    chromium-browser \
+    chromium \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Create dual-user setup

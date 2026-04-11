@@ -20,7 +20,6 @@ const ENV_DEFAULTS: Record<string, string> = {
   session_recording_enabled: process.env.SESSION_RECORDING_ENABLED ?? 'false',
   memory_promotion_threshold: process.env.MEMORY_PROMOTION_THRESHOLD ?? '5.0',
   working_memory_ttl_hours: process.env.WORKING_MEMORY_TTL_HOURS ?? '48',
-  session_timeout_minutes: process.env.SESSION_TIMEOUT_MINUTES ?? '30',
   max_conversation_history: process.env.MAX_CONVERSATION_HISTORY ?? '100',
   log_level: process.env.LOG_LEVEL ?? 'info',
   ai_model: process.env.AI_MODEL ?? 'claude-haiku-4-5-20251001',
