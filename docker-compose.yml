@@ -9,7 +9,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./backend/db/schema.sql:/docker-entrypoint-initdb.d/00-schema.sql:ro
-      - ../LINA/lina_schema.sql:/docker-entrypoint-initdb.d/01-lina-schema.sql:ro
+      - ./backend/db/lina_schema.sql:/docker-entrypoint-initdb.d/01-lina-schema.sql:ro
     ports:
       - "5432:5432"
     networks:
@@ -29,9 +29,9 @@ services:
   dragonfly:
     image: docker.dragonflydb.io/dragonflydb/dragonfly:latest
     container_name: collabsmart-dragonfly
-    command: dragonfly --logtostderr --requirepass ${DRAGONFLY_PASSWORD:-dragonfly_secret} --maxmemory ${DRAGONFLY_MAX_MEMORY:-512mb}
+    command: dragonfly --logtostderr --requirepass ${DRAGONFLY_PASSWORD:-collabsmart} --maxmemory ${DRAGONFLY_MAX_MEMORY:-2gb}
     environment:
-      - DRAGONFLY_PASSWORD=${DRAGONFLY_PASSWORD:-dragonfly_secret}
+      - DRAGONFLY_PASSWORD=${DRAGONFLY_PASSWORD:-collabsmart}
     ulimits:
       memlock: -1
     volumes:
@@ -60,7 +60,7 @@ services:
       - PGID=1000
       - TZ=UTC
       - DISPLAY=:1
-      - VNC_PASSWORD=${VNC_PASSWORD:-collabsmart_vnc}
+      - VNC_PASSWORD=${VNC_PASSWORD:-collabsmart}
     volumes:
       - workspace:/workspace
       - ./container/configs:/configs:ro
@@ -77,16 +77,16 @@ services:
 
   lina:
     build:
-      context: ../LINA
+      context: ./backend/lina
       dockerfile: Dockerfile
     container_name: collabsmart-lina
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - DATABASE_URL=postgresql://${POSTGRES_USER:-collabsmart}:${POSTGRES_PASSWORD:-collabsmart}@postgres:5432/${POSTGRES_DB:-collabsmart}
-      - REDIS_URL=redis://:${DRAGONFLY_PASSWORD:-dragonfly_secret}@dragonfly:6379
-      - LINA_MODEL=${LINA_MODEL:-claude-sonnet-4-6}
-      - LINA_MAX_TOKENS=${LINA_MAX_TOKENS:-1024}
-      - LINA_LOG_LEVEL=${LOG_LEVEL:-info}
+      - REDIS_URL=redis://:${DRAGONFLY_PASSWORD:-collabsmart}@dragonfly:6379
+      - LINA_MODEL=${LINA_MODEL:-claude-haiku-4-5-20251001}
+      - LINA_MAX_TOKENS=${LINA_MAX_TOKENS:-4096}
+      - LINA_LOG_LEVEL=${LOG_LEVEL:-INFO}
     ports:
       - "8001:8001"
     networks:
@@ -123,7 +123,7 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-collabsmart}
       - DRAGONFLY_HOST=dragonfly
       - DRAGONFLY_PORT=6379
-      - DRAGONFLY_PASSWORD=${DRAGONFLY_PASSWORD:-dragonfly_secret}
+      - DRAGONFLY_PASSWORD=${DRAGONFLY_PASSWORD:-collabsmart}
       - DRAGONFLY_DB=${DRAGONFLY_DB:-0}
       - AI_MODEL=${AI_MODEL:-claude-haiku-4-5-20251001}
       - AI_MAX_TOKENS=${AI_MAX_TOKENS:-4096}
@@ -133,9 +133,9 @@ services:
       - MEMORY_PROMOTION_THRESHOLD=${MEMORY_PROMOTION_THRESHOLD:-5.0}
       - WORKING_MEMORY_TTL_HOURS=${WORKING_MEMORY_TTL_HOURS:-48}
       - SESSION_RECORDING_ENABLED=${SESSION_RECORDING_ENABLED:-false}
-      - SESSION_TIMEOUT_MINUTES=${SESSION_TIMEOUT_MINUTES:-30}
+      - SESSION_TIMEOUT_MINUTES=${SESSION_TIMEOUT_MINUTES:-90}
       - MAX_CONVERSATION_HISTORY=${MAX_CONVERSATION_HISTORY:-100}
-      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - LINA_SERVICE_URL=http://lina:8001
     volumes:
       - workspace:/workspace

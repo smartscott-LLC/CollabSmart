@@ -58,7 +58,7 @@ export function getRedisClient(): Redis {
 
 /** Initialise schema. Safe to call multiple times. */
 export async function initSchema(): Promise<void> {
-  const schemaPath = path.join(__dirname, '../../../backend/db/schema.sql');
+  const schemaPath = path.join(__dirname, '../../../backend/src/db/schema.sql');
   if (!fs.existsSync(schemaPath)) {
     logger.warn('schema.sql not found at expected path, skipping DB init');
     return;
