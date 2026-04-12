@@ -63,6 +63,7 @@ All six services share a Docker named volume `workspace` mounted at `/workspace`
 - [Docker](https://docs.docker.com/get-docker/) ≥ 24
 - [Docker Compose](https://docs.docker.com/compose/) ≥ 2 (or `docker compose` plugin)
 - An [Anthropic API key](https://console.anthropic.com/)
+- Npm or Pnpm
 
 ---
 
@@ -73,13 +74,21 @@ All six services share a Docker named volume `workspace` mounted at `/workspace`
 git clone https://github.com/smartscott-LLC/CollabSmart.git
 cd CollabSmart
 
-# 2. Run the start script — it creates .env on first run
+# 2. cd backend && npm install
+
+# 3. cd ..
+
+# 4. cd frontend && npm install
+
+# 5. cd ..
+
+# 6. Run the start script — it creates .env on first run
 ./start.sh
 
-# 3. Edit .env and add your Anthropic API key
+# 7. Edit .env and add your Anthropic API key
 nano .env   # set ANTHROPIC_API_KEY=sk-ant-...
 
-# 4. Start the full stack
+# 8. Start the full stack
 ./start.sh
 ```
 
@@ -98,7 +107,10 @@ docker compose logs -f
 # Stop everything
 docker compose down
 ```
-
+```
+# To shutdown and start fresh use - 'docker compose down -v'
+# **WARNING** Using this command will erase the volumes completely and start all memory over!!
+```
 ---
 
 ## 🗂️ Repository Layout
