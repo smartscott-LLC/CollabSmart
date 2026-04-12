@@ -73,21 +73,18 @@ All six services share a Docker named volume `workspace` mounted at `/workspace`
 # 1. Clone the repository
 git clone https://github.com/smartscott-LLC/CollabSmart.git
 cd CollabSmart
-
-# 2. cd backend && npm install
-
-# 3. cd ..
-
-# 4. cd frontend && npm install
-
-# 5. cd ..
-
+# 2.
+cd backend && npm install
+# 3.
+cd ..
+# 4.
+cd frontend && npm install
+# 5.
+cd ..
 # 6. Run the start script — it creates .env on first run
 ./start.sh
-
 # 7. Edit .env and add your Anthropic API key
 nano .env   # set ANTHROPIC_API_KEY=sk-ant-...
-
 # 8. Start the full stack
 ./start.sh
 ```
