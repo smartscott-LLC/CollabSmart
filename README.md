@@ -563,4 +563,4 @@ After ingesting, set `onet_enabled = true` in the Settings panel.
 
 ## 📄 License
 
-BML — see [LICENSE](LICENSE) for details.
+BSL — see [LICENSE](LICENSE) for details.
