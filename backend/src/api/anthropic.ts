@@ -1,4 +1,3 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { Socket } from 'socket.io';
 import logger from '../logger';
 import { TOOL_DEFINITIONS, dispatchTool, ToolContext } from '../tools';
@@ -6,14 +5,14 @@ import { broadcastLog } from '../orchestrator';
 import { MemoryManager } from '../memory';
 import { getSetting } from '../settings';
 import { linaGetContext, linaEvaluate } from './lina';
-
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY || '',
-});
+import { getProvider } from './providers';
+import type { NormalizedTool } from './providers/types';
 
 // Env-var defaults; overridden at call time by the DB settings.
 const DEFAULT_MODEL = process.env.AI_MODEL || 'claude-haiku-4-5-20251001';
 const DEFAULT_MAX_TOKENS = parseInt(process.env.AI_MAX_TOKENS || '4096', 10);
+const DEFAULT_PROVIDER = process.env.AI_PROVIDER || 'anthropic';
+const DEFAULT_BASE_URL = process.env.AI_BASE_URL || '';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -101,6 +100,8 @@ export async function processChat(
   // Read runtime settings (DB-backed, cached 60 s, env-var fallback)
   const model = await getSetting('ai_model', DEFAULT_MODEL);
   const maxTokens = parseInt(await getSetting('ai_max_tokens', String(DEFAULT_MAX_TOKENS)), 10);
+  const providerName = await getSetting('ai_provider', DEFAULT_PROVIDER);
+  const baseUrlOverride = await getSetting('ai_base_url', DEFAULT_BASE_URL);
   const toolPatternEnabled = await getSetting('tool_pattern_memory_enabled', 'true');
   const maxPatternAgeDays = parseInt(await getSetting('max_tool_pattern_age_days', '30'), 10);
 
@@ -129,107 +130,77 @@ export async function processChat(
     ? `${basePrompt}\n\n${enrichedContext.systemPromptAddition}`
     : basePrompt;
 
-  const messages: Anthropic.MessageParam[] = conversation.history.map((m) => ({
-    role: m.role,
-    content: m.content,
-  }));
+  // History sent to the provider excludes the just-added user turn (provider appends it)
+  const historyWithoutCurrent = conversation.history.slice(0, -1);
 
   let finalResponse = '';
-  const toolSequenceUsed: string[] = []; // track tool calls in this turn
+  const toolSequenceUsed: string[] = [];
 
   try {
-    let continueLoop = true;
+    const provider = getProvider(providerName, baseUrlOverride);
+    emitAILog('Thinking...', `${providerName}/${model}`, 'thinking');
 
-    while (continueLoop) {
-      emitAILog('Thinking...', model, 'thinking');
+    finalResponse = await provider.runAgentLoop({
+      model,
+      maxTokens,
+      systemPrompt,
+      history: historyWithoutCurrent,
+      userMessage,
+      tools: TOOL_DEFINITIONS as NormalizedTool[],
+      callbacks: {
+        onTextChunk: (text) => {
+          socket.emit('chat:typing', { text });
+          emitAILog(text, `${providerName}/${model}`, 'text');
+        },
+        onToolStart: (name, input) => {
+          emitAILog(`Using tool: ${name}`, `${providerName}/${model}`, 'tool-call');
+          socket.emit('tool:start', { name, input });
+        },
+        onToolResult: (name, success, output) => {
+          socket.emit('tool:result', { name, success, output });
+        },
+        onToolName: (name) => {
+          toolSequenceUsed.push(name);
+        },
+        executeTool: async (name, input) => {
+          const startTime = Date.now();
+          const result = await dispatchTool(name, input, toolCtx);
+          const processingMs = Date.now() - startTime;
 
-      const response = await anthropic.messages.create({
-        model,
-        max_tokens: maxTokens,
-        system: systemPrompt,
-        tools: TOOL_DEFINITIONS as Anthropic.Tool[],
-        messages,
-      });
+          // Record invocation in agent factory (best-effort)
+          const agentFactoryEnabled = await getSetting('agent_factory_enabled', 'true');
+          if (agentFactoryEnabled === 'true') {
+            const agent = await memory.agentFactory
+              .selectAgent(userMessage, enrichedContext.analysis.scenarioType)
+              .catch(() => null);
 
-      if (response.stop_reason === 'tool_use') {
-        const assistantContent = response.content;
-        messages.push({ role: 'assistant', content: assistantContent });
-
-        const toolResults: Anthropic.ToolResultBlockParam[] = [];
-
-        for (const block of assistantContent) {
-          if (block.type === 'text') {
-            socket.emit('chat:typing', { text: block.text });
-            finalResponse += block.text;
-            emitAILog(block.text, model, 'text');
-          } else if (block.type === 'tool_use') {
-            const startTime = Date.now();
-            emitAILog(`Using tool: ${block.name}`, model, 'tool-call');
-            socket.emit('tool:start', { name: block.name, input: block.input });
-
-            const result = await dispatchTool(
-              block.name,
-              block.input as Record<string, unknown>,
-              toolCtx,
-            );
-
-            const processingMs = Date.now() - startTime;
-            toolSequenceUsed.push(block.name);
-
-            socket.emit('tool:result', {
-              name: block.name,
-              success: result.success,
-              output: result.output || result.error,
-            });
-
-            // Record invocation in agent factory (best-effort)
-            const agentFactoryEnabled = await getSetting('agent_factory_enabled', 'true');
-            if (agentFactoryEnabled === 'true') {
-              const agent = await memory.agentFactory
-                .selectAgent(userMessage, enrichedContext.analysis.scenarioType)
-                .catch(() => null);
-
-              await memory.agentFactory
-                .recordInvocation({
-                  agentId: agent?.id,
-                  sessionId,
-                  userId,
-                  userQuery: userMessage,
-                  toolUsed: block.name,
-                  toolInput: block.input as Record<string, unknown>,
-                  toolOutputExcerpt: result.output ?? result.error,
-                  wasSuccessful: result.success,
-                  processingTimeMs: processingMs,
-                  delegationConfidence: agent ? 0.8 : 0.0,
-                  delegationReason: agent
-                    ? `Scenario match: ${enrichedContext.analysis.scenarioType}`
-                    : 'No agent matched',
-                  scenarioType: enrichedContext.analysis.scenarioType,
-                })
-                .catch(() => {});
-            }
-
-            toolResults.push({
-              type: 'tool_result',
-              tool_use_id: block.id,
-              content: result.success ? result.output || '' : `Error: ${result.error}`,
-            });
+            await memory.agentFactory
+              .recordInvocation({
+                agentId: agent?.id,
+                sessionId,
+                userId,
+                userQuery: userMessage,
+                toolUsed: name,
+                toolInput: input,
+                toolOutputExcerpt: result.output ?? result.error,
+                wasSuccessful: result.success,
+                processingTimeMs: processingMs,
+                delegationConfidence: agent ? 0.8 : 0.0,
+                delegationReason: agent
+                  ? `Scenario match: ${enrichedContext.analysis.scenarioType}`
+                  : 'No agent matched',
+                scenarioType: enrichedContext.analysis.scenarioType,
+              })
+              .catch(() => {});
           }
-        }
 
-        messages.push({ role: 'user', content: toolResults });
-      } else {
-        for (const block of response.content) {
-          if (block.type === 'text') {
-            finalResponse += block.text;
-          }
-        }
-        continueLoop = false;
-      }
-    }
+          return result;
+        },
+      },
+    });
 
     conversation.history.push({ role: 'assistant', content: finalResponse });
-    emitAILog(finalResponse, model, 'response');
+    emitAILog(finalResponse, `${providerName}/${model}`, 'response');
 
     // Run LINA's value engine on the final response (non-blocking)
     void linaEvaluate(effectiveUserId, sessionId, finalResponse, userMessage).then(
@@ -285,7 +256,7 @@ export async function processChat(
   } catch (err: unknown) {
     const error = err instanceof Error ? err.message : String(err);
     logger.error(`AI API error: ${error}`);
-    emitAILog(`Error: ${error}`, model, 'error');
+    emitAILog(`Error: ${error}`, `${providerName}/${model}`, 'error');
     throw err;
   }
 }

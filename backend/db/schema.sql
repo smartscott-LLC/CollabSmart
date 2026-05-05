@@ -726,3 +726,14 @@ INSERT INTO app_settings (key, value, description) VALUES
     ('feedback_collection_enabled', 'true',
         'Accept explicit user feedback ratings via the /api/feedback endpoint')
 ON CONFLICT (key) DO UPDATE SET description = EXCLUDED.description;
+
+-- ==================================================
+-- MULTI-PROVIDER AI SETTINGS
+-- Allows switching between Anthropic, OpenAI, Ollama, Groq, OpenRouter, etc.
+-- ==================================================
+INSERT INTO app_settings (key, value, description) VALUES
+    ('ai_provider', 'anthropic',
+        'AI provider: anthropic | openai | ollama | groq | openrouter | together_ai'),
+    ('ai_base_url', '',
+        'Optional base URL override for the AI provider (e.g. http://localhost:11434/v1 for Ollama). Leave empty to use the provider default.')
+ON CONFLICT (key) DO UPDATE SET description = EXCLUDED.description;

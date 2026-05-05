@@ -181,6 +181,58 @@ function SelectInput({
 
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
 
+/** Per-provider suggested model IDs shown as quick-select hints. */
+const PROVIDER_MODEL_SUGGESTIONS: Record<string, Array<{ value: string; label: string }>> = {
+  anthropic: [
+    { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5 (Fast)' },
+    { value: 'claude-3-5-haiku-20241022', label: 'Claude 3.5 Haiku (Balanced-Fast)' },
+    { value: 'claude-3-5-sonnet-20241022', label: 'Claude 3.5 Sonnet (Powerful)' },
+    { value: 'claude-3-opus-20240229', label: 'Claude 3 Opus (Most Capable)' },
+  ],
+  openai: [
+    { value: 'gpt-4o-mini', label: 'GPT-4o Mini (Fast, Affordable)' },
+    { value: 'gpt-4o', label: 'GPT-4o (Powerful)' },
+    { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo (Economy)' },
+  ],
+  ollama: [
+    { value: 'llama3.2', label: 'Llama 3.2 (Free, Local)' },
+    { value: 'llama3.1', label: 'Llama 3.1 (Free, Local)' },
+    { value: 'mistral', label: 'Mistral 7B (Free, Local)' },
+    { value: 'gemma2', label: 'Gemma 2 (Free, Local)' },
+    { value: 'qwen2.5-coder', label: 'Qwen 2.5 Coder (Free, Local)' },
+    { value: 'phi4', label: 'Phi-4 (Free, Local)' },
+    { value: 'deepseek-r1', label: 'DeepSeek R1 (Free, Local)' },
+  ],
+  groq: [
+    { value: 'llama-3.1-8b-instant', label: 'Llama 3.1 8B Instant (Free tier)' },
+    { value: 'llama-3.3-70b-versatile', label: 'Llama 3.3 70B Versatile (Free tier)' },
+    { value: 'gemma2-9b-it', label: 'Gemma 2 9B (Free tier)' },
+    { value: 'mixtral-8x7b-32768', label: 'Mixtral 8x7B (Free tier)' },
+  ],
+  openrouter: [
+    { value: 'meta-llama/llama-4-maverick:free', label: 'Llama 4 Maverick (FREE)' },
+    { value: 'meta-llama/llama-4-scout:free', label: 'Llama 4 Scout (FREE)' },
+    { value: 'google/gemma-3-27b-it:free', label: 'Gemma 3 27B (FREE)' },
+    { value: 'mistralai/mistral-7b-instruct:free', label: 'Mistral 7B (FREE)' },
+    { value: 'qwen/qwen3-30b-a3b:free', label: 'Qwen3 30B (FREE)' },
+    { value: 'deepseek/deepseek-r1:free', label: 'DeepSeek R1 (FREE)' },
+  ],
+  together_ai: [
+    { value: 'meta-llama/Llama-3.2-90B-Vision-Instruct-Turbo', label: 'Llama 3.2 90B (Free tier)' },
+    { value: 'mistralai/Mistral-7B-Instruct-v0.3', label: 'Mistral 7B (Free tier)' },
+    { value: 'Qwen/Qwen2.5-Coder-32B-Instruct', label: 'Qwen 2.5 Coder 32B (Free tier)' },
+  ],
+};
+
+const PROVIDER_OPTIONS = [
+  { value: 'anthropic', label: '🤖 Anthropic (Claude)' },
+  { value: 'openai', label: '🟢 OpenAI (GPT)' },
+  { value: 'ollama', label: '🦙 Ollama (FREE — local)' },
+  { value: 'groq', label: '⚡ Groq (FREE tier)' },
+  { value: 'openrouter', label: '🌐 OpenRouter (FREE models)' },
+  { value: 'together_ai', label: '🤝 Together AI (FREE tier)' },
+];
+
 function AITab({
   settings,
   saving,
@@ -190,13 +242,6 @@ function AITab({
   saving: Record<string, boolean>;
   onSave: (key: string, value: string) => void;
 }) {
-  const MODEL_OPTIONS = [
-    { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku (Fast)' },
-    { value: 'claude-3-5-haiku-20241022', label: 'Claude 3.5 Haiku (Balanced-Fast)' },
-    { value: 'claude-3-5-sonnet-20241022', label: 'Claude 3.5 Sonnet (Powerful)' },
-    { value: 'claude-3-opus-20240229', label: 'Claude 3 Opus (Most Capable)' },
-  ];
-
   const LOG_LEVEL_OPTIONS = [
     { value: 'debug', label: 'debug' },
     { value: 'info', label: 'info' },
@@ -204,10 +249,17 @@ function AITab({
     { value: 'error', label: 'error' },
   ];
 
+  const currentProvider = settings['ai_provider'] ?? 'anthropic';
+  const modelSuggestions = PROVIDER_MODEL_SUGGESTIONS[currentProvider] ?? [];
+
   const [maxTokens, setMaxTokens] = useState(settings['ai_max_tokens'] ?? '4096');
+  const [modelInput, setModelInput] = useState(settings['ai_model'] ?? 'claude-haiku-4-5-20251001');
+  const [baseUrlInput, setBaseUrlInput] = useState(settings['ai_base_url'] ?? '');
 
   useEffect(() => {
     setMaxTokens(settings['ai_max_tokens'] ?? '4096');
+    setModelInput(settings['ai_model'] ?? 'claude-haiku-4-5-20251001');
+    setBaseUrlInput(settings['ai_base_url'] ?? '');
   }, [settings]);
 
   return (
@@ -217,18 +269,96 @@ function AITab({
       </p>
 
       <SettingRow
-        label="Model"
-        description="Model used for all AI responses. Changes take effect on the next message."
+        label="Provider"
+        description="AI backend to use. Ollama, Groq, and OpenRouter all have free options."
       >
         <div className="flex items-center gap-2">
           <SelectInput
-            value={settings['ai_model'] ?? 'claude-haiku-4-5-20251001'}
-            options={MODEL_OPTIONS}
-            onChange={(v) => onSave('ai_model', v)}
+            value={currentProvider}
+            options={PROVIDER_OPTIONS}
+            onChange={(v) => onSave('ai_provider', v)}
           />
-          {saving['ai_model'] && (
+          {saving['ai_provider'] && (
             <span className="text-xs text-sharp-ai animate-pulse">saving…</span>
           )}
+        </div>
+      </SettingRow>
+
+      <SettingRow
+        label="Model"
+        description="Model ID for the selected provider. Type any valid model ID or pick a suggestion below."
+      >
+        <div className="flex flex-col items-end gap-1">
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={modelInput}
+              onChange={(e) => setModelInput(e.target.value)}
+              placeholder="e.g. llama3.2"
+              className="
+                w-52 bg-sharp-bg border border-sharp-border rounded px-2 py-1
+                text-xs font-mono text-sharp-text
+                focus:outline-none focus:border-sharp-accent
+              "
+            />
+            <button
+              type="button"
+              onClick={() => onSave('ai_model', modelInput)}
+              disabled={saving['ai_model']}
+              className="text-xs px-2 py-1 bg-sharp-accent hover:bg-purple-700 text-white rounded
+                transition-colors disabled:opacity-40"
+            >
+              {saving['ai_model'] ? '…' : 'Save'}
+            </button>
+          </div>
+          {modelSuggestions.length > 0 && (
+            <div className="flex flex-wrap gap-1 justify-end max-w-xs">
+              {modelSuggestions.map((s) => (
+                <button
+                  key={s.value}
+                  type="button"
+                  onClick={() => {
+                    setModelInput(s.value);
+                    onSave('ai_model', s.value);
+                  }}
+                  className="text-[10px] px-1.5 py-0.5 rounded border border-sharp-border
+                    text-gray-400 hover:text-sharp-text hover:border-sharp-accent
+                    transition-colors font-mono truncate max-w-[160px]"
+                  title={s.label}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </SettingRow>
+
+      <SettingRow
+        label="Base URL"
+        description="Optional endpoint override. Required for Ollama (http://localhost:11434/v1). Leave blank to use the provider default."
+      >
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            value={baseUrlInput}
+            onChange={(e) => setBaseUrlInput(e.target.value)}
+            placeholder="http://localhost:11434/v1"
+            className="
+              w-52 bg-sharp-bg border border-sharp-border rounded px-2 py-1
+              text-xs font-mono text-sharp-text
+              focus:outline-none focus:border-sharp-accent
+            "
+          />
+          <button
+            type="button"
+            onClick={() => onSave('ai_base_url', baseUrlInput)}
+            disabled={saving['ai_base_url']}
+            className="text-xs px-2 py-1 bg-sharp-accent hover:bg-purple-700 text-white rounded
+              transition-colors disabled:opacity-40"
+          >
+            {saving['ai_base_url'] ? '…' : 'Save'}
+          </button>
         </div>
       </SettingRow>
 
