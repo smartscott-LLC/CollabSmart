@@ -34,7 +34,9 @@ export class OpenAICompatProvider implements AIProvider {
 
   constructor(apiKey: string, baseURL?: string) {
     this.client = new OpenAI({
-      apiKey: apiKey || 'ollama', // Ollama ignores the key but the SDK requires a non-empty string
+      // Providers like Ollama don't require a key but the SDK requires a non-empty string.
+      // Using 'not-needed' avoids the misleading 'ollama' placeholder.
+      apiKey: apiKey || 'not-needed',
       baseURL,
     });
   }

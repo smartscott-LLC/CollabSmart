@@ -130,7 +130,10 @@ export async function processChat(
     ? `${basePrompt}\n\n${enrichedContext.systemPromptAddition}`
     : basePrompt;
 
-  // History sent to the provider excludes the just-added user turn (provider appends it)
+  // The history slice excludes the current user turn we just pushed above so
+  // the provider can append it in the correct position for its own message format.
+  // `conversation.history` always ends with the user message we added at line above,
+  // so slice(0, -1) reliably contains only the prior exchange.
   const historyWithoutCurrent = conversation.history.slice(0, -1);
 
   let finalResponse = '';

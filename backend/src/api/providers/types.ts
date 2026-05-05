@@ -71,5 +71,4 @@ export type ProviderName =
   | 'ollama'
   | 'groq'
   | 'openrouter'
-  | 'together_ai'
-  | 'gemini';
+  | 'together_ai';

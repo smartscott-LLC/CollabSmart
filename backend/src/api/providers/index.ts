@@ -60,8 +60,9 @@ export function getProvider(providerName: string, baseUrlOverride: string): AIPr
   if (!baseURL) {
     throw new Error(
       `Unknown provider "${provider}". ` +
-        'Set AI_BASE_URL or choose a known provider: ' +
-        Object.keys(PROVIDER_BASE_URLS).join(', ') + '.',
+        'Set ai_provider to one of: ' +
+        Object.keys(PROVIDER_BASE_URLS).join(', ') +
+        ', or set ai_provider=anthropic.',
     );
   }
 
