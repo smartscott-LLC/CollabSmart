@@ -6,7 +6,7 @@
 
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.4-blue?logo=typescript)](https://www.typescriptlang.org/)
 [![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)](https://nextjs.org/)
-[![Claude](https://img.shields.io/badge/Claude-Haiku%204.5-orange?logo=anthropic)](https://www.anthropic.com/)
+[![AI Provider](https://img.shields.io/badge/AI-Multi--Provider-orange)](https://github.com/smartscott-LLC/CollabSmart)
 [![Docker](https://img.shields.io/badge/Docker-Compose-blue?logo=docker)](https://docs.docker.com/compose/)
 
 </div>
@@ -21,6 +21,7 @@ CollabSmart creates a **shared containerized workspace** where you and **LINA** 
 - 🖥️ **Live shared desktop** — Watch LINA work via an in-browser noVNC view
 - 💬 **Streaming AI chat** — Real-time responses with LINA's identity and values layer
 - 🧠 **Tiered memory system** — LINA remembers context across sessions using Dragonfly + PostgreSQL
+- 🔌 **Pluggable AI providers** — Use Anthropic Claude, OpenAI, or **free** options like Ollama (local), Groq, OpenRouter, and Together AI — switchable at runtime
 - 🤖 **Specialized Agent Factory** — Domain-expert agents (debugger, architect, security analyst, …) auto-activate per scenario and evolve through usage
 - 🔧 **Expanded tool set** — File operations, search, git, memory recall/store
 - 🎯 **Adaptive collaboration modes** — LINA dynamically shifts between pair-programming, teaching, debugging, and more
@@ -62,7 +63,13 @@ All six services share a Docker named volume `workspace` mounted at `/workspace`
 
 - [Docker](https://docs.docker.com/get-docker/) ≥ 24
 - [Docker Compose](https://docs.docker.com/compose/) ≥ 2 (or `docker compose` plugin)
-- An [Anthropic API key](https://console.anthropic.com/)
+- An AI provider — pick **one**:
+  - **Anthropic** (default) — API key from [console.anthropic.com](https://console.anthropic.com)
+  - **Ollama** (free, local) — install from [ollama.com](https://ollama.com) — no API key needed
+  - **Groq** (free tier) — API key from [console.groq.com](https://console.groq.com)
+  - **OpenRouter** (free models) — API key from [openrouter.ai](https://openrouter.ai)
+  - **Together AI** (free tier) — API key from [together.ai](https://api.together.xyz)
+  - **OpenAI** — API key from [platform.openai.com](https://platform.openai.com)
 - Npm or Pnpm
 
 ---
@@ -83,8 +90,13 @@ cd frontend && npm install
 cd ..
 # 6. Run the start script — it creates .env on first run
 ./start.sh
-# 7. Edit .env and add your Anthropic API key
+# 7. Edit .env and configure your AI provider (see AI Providers section below).
+#    Anthropic (default):
 nano .env   # set ANTHROPIC_API_KEY=sk-ant-...
+#    Ollama (free, local — no key required):
+#    AI_PROVIDER=ollama  AI_MODEL=llama3.2  AI_BASE_URL=http://localhost:11434/v1
+#    Groq (free tier):
+#    AI_PROVIDER=groq  AI_API_KEY=gsk_...  AI_MODEL=llama-3.1-8b-instant
 # 8. Start the full stack
 ./start.sh
 ```
@@ -121,8 +133,13 @@ CollabSmart/
 ├── backend/                  # Node.js / TypeScript AI orchestration server
 │   ├── src/
 │   │   ├── index.ts          # Express + Socket.IO entry point (port 3001)
-│   │   ├── api/anthropic.ts  # Claude Haiku 4.5 integration + tool-use loop
+│   │   ├── api/anthropic.ts  # processChat() — delegates to active AI provider
 │   │   ├── api/lina.ts       # TypeScript client for LINA Identity Service
+│   │   ├── api/providers/    # Pluggable AI provider adapters
+│   │   │   ├── types.ts             # AIProvider interface + shared types
+│   │   │   ├── anthropic-provider.ts# Anthropic Claude adapter
+│   │   │   ├── openai-compat-provider.ts # OpenAI / Ollama / Groq / OpenRouter / Together AI
+│   │   │   └── index.ts             # getProvider() factory
 │   │   ├── db/               # PostgreSQL pool + schema initialisation
 │   │   ├── memory/           # 4-tier memory system (see below)
 │   │   │   ├── agentFactory.ts       # Specialized agent selection + tool pattern memory
@@ -192,14 +209,17 @@ cp .env.example .env
 
 | Variable | Default | Required | Description |
 |---|---|---|---|
-| `ANTHROPIC_API_KEY` | — | ✅ | Claude API key |
+| `ANTHROPIC_API_KEY` | — | ✅ when `AI_PROVIDER=anthropic` | Anthropic Claude API key |
+| `AI_PROVIDER` | `anthropic` | | AI backend: `anthropic` \| `openai` \| `ollama` \| `groq` \| `openrouter` \| `together_ai` |
+| `AI_API_KEY` | — | ✅ for non-Anthropic paid providers | API key for OpenAI / Groq / OpenRouter / Together AI |
+| `AI_BASE_URL` | _(auto per provider)_ | | Override the provider endpoint (e.g. `http://localhost:11434/v1` for Ollama) |
+| `AI_MODEL` | `claude-haiku-4-5-20251001` | | Model identifier for the selected provider (see AI Providers section) |
+| `AI_MAX_TOKENS` | `4096` | | Max tokens per response |
 | `PORT` | `3001` | | Backend HTTP/WS listen port |
 | `WORKSPACE_PATH` | `/workspace` | | Filesystem root for all AI tool operations |
 | `FRONTEND_URL` | `http://localhost:3000` | | CORS allowed origin for the backend |
 | `NEXT_PUBLIC_BACKEND_URL` | `http://localhost:3001` | | Socket.IO + REST endpoint (frontend) |
 | `NEXT_PUBLIC_NOVNC_URL` | `http://localhost:6080` | | noVNC iframe URL (frontend) |
-| `AI_MODEL` | `claude-haiku-4-5-20251001` | | Claude model identifier |
-| `AI_MAX_TOKENS` | `4096` | | Max tokens per response |
 | `POSTGRES_HOST` | `postgres` | | PostgreSQL hostname |
 | `POSTGRES_PORT` | `5432` | | PostgreSQL port |
 | `POSTGRES_DB` | `collabsmart` | | Database name |
@@ -226,7 +246,81 @@ cp .env.example .env
 | `LINA_MODEL` | `claude-haiku-4-5-20251001` | | Claude model used by LINA's identity service |
 | `LINA_MAX_TOKENS` | `4096` | | Max tokens for LINA's identity service responses |
 
-All of these (except `ANTHROPIC_API_KEY` and the `NEXT_PUBLIC_*` vars) can also be changed at runtime via the Settings panel without restarting — the DB-backed settings cache refreshes every 60 seconds.
+All of these (except `ANTHROPIC_API_KEY`, `AI_API_KEY`, and the `NEXT_PUBLIC_*` vars) can also be changed at runtime via the Settings panel without restarting — the DB-backed settings cache refreshes every 60 seconds.
+
+---
+
+## 🔌 AI Providers
+
+CollabSmart supports six AI providers selectable via the `AI_PROVIDER` setting or the **Settings → AI** panel — no restart required.
+
+### Provider Quick-Reference
+
+| Provider | Cost | `AI_PROVIDER` | Key required | Default base URL |
+|---|---|---|---|---|
+| **Anthropic** | Pay-as-you-go | `anthropic` | `ANTHROPIC_API_KEY` | _(SDK default)_ |
+| **OpenAI** | Pay-as-you-go | `openai` | `AI_API_KEY` | `https://api.openai.com/v1` |
+| **Ollama** | **Free (local)** | `ollama` | None | `http://localhost:11434/v1` |
+| **Groq** | **Free tier** | `groq` | `AI_API_KEY` | `https://api.groq.com/openai/v1` |
+| **OpenRouter** | **Free models** | `openrouter` | `AI_API_KEY` | `https://openrouter.ai/api/v1` |
+| **Together AI** | **Free tier** | `together_ai` | `AI_API_KEY` | `https://api.together.xyz/v1` |
+
+Use `AI_BASE_URL` to override the endpoint for any provider — useful for self-hosted models, LM Studio, or any other OpenAI-compatible API.
+
+### Suggested Models Per Provider
+
+| Provider | Suggested model IDs |
+|---|---|
+| Anthropic | `claude-haiku-4-5-20251001`, `claude-3-5-sonnet-20241022` |
+| OpenAI | `gpt-4o-mini`, `gpt-4o` |
+| Ollama | `llama3.2`, `mistral`, `gemma2`, `qwen2.5-coder`, `deepseek-r1` |
+| Groq | `llama-3.1-8b-instant`, `llama-3.3-70b-versatile`, `gemma2-9b-it` |
+| OpenRouter | `meta-llama/llama-4-maverick:free`, `google/gemma-3-27b-it:free`, `deepseek/deepseek-r1:free` |
+| Together AI | `meta-llama/Llama-3.2-90B-Vision-Instruct-Turbo`, `Qwen/Qwen2.5-Coder-32B-Instruct` |
+
+### Free-Tier Setup Examples
+
+**Ollama (fully local, no API key)**
+```bash
+# 1. Install Ollama: https://ollama.com
+# 2. Pull a model
+ollama pull llama3.2
+# 3. In .env:
+AI_PROVIDER=ollama
+AI_MODEL=llama3.2
+AI_BASE_URL=http://localhost:11434/v1
+# ANTHROPIC_API_KEY can be left empty
+```
+
+**Groq (free tier)**
+```bash
+# 1. Get a free key at https://console.groq.com
+# 2. In .env:
+AI_PROVIDER=groq
+AI_API_KEY=gsk_...
+AI_MODEL=llama-3.1-8b-instant
+```
+
+**OpenRouter (free models with `:free` suffix)**
+```bash
+# 1. Get a free key at https://openrouter.ai
+# 2. In .env:
+AI_PROVIDER=openrouter
+AI_API_KEY=sk-or-...
+AI_MODEL=meta-llama/llama-4-maverick:free
+```
+
+All three settings (`ai_provider`, `ai_model`, `ai_base_url`) can also be changed live in the **Settings panel → AI tab** without editing `.env` or restarting.
+
+### How It Works
+
+The provider abstraction lives in `backend/src/api/providers/`:
+
+- `AnthropicProvider` — uses the native `@anthropic-ai/sdk` for tool-use loop support.
+- `OpenAICompatProvider` — uses the `openai` SDK with a configurable `baseURL`; covers all other providers.
+- `getProvider(name, baseUrl)` — factory called per request; reads from DB settings so provider switches take effect on the next message.
+
+LINA's Identity Service (`lina/lina_service.py`) retains its own `LINA_MODEL` setting and still uses the Anthropic SDK directly — this can be pointed at a different model independently of the chat provider.
 
 ---
 
@@ -529,7 +623,11 @@ After ingesting, set `onet_enabled = true` in the Settings panel.
 
 | Symptom | Likely Cause | Fix |
 |---|---|---|
-| Backend won't start | `ANTHROPIC_API_KEY` not set | Copy `.env.example` → `.env` and add your key |
+| Backend won't start | `ANTHROPIC_API_KEY` not set (default provider) | Copy `.env.example` → `.env` and add your key, or switch to a free provider |
+| "Unknown provider" error | Invalid `AI_PROVIDER` value | Check spelling; valid values: `anthropic`, `openai`, `ollama`, `groq`, `openrouter`, `together_ai` |
+| Ollama not responding | Ollama not running or wrong base URL | Start Ollama (`ollama serve`); confirm `AI_BASE_URL=http://localhost:11434/v1` |
+| Groq / OpenRouter 401 | `AI_API_KEY` not set or incorrect | Set `AI_API_KEY` in `.env` with the key from your provider dashboard |
+| Model not found | Wrong model ID for the selected provider | See the "Suggested Models" table in the AI Providers section |
 | Frontend can't connect | `NEXT_PUBLIC_BACKEND_URL` mismatch | Ensure the var matches the running backend URL |
 | Desktop iframe blank | noVNC container not ready | Wait for `desktop` healthcheck; check `docker compose logs desktop` |
 | Desktop "dbus-launch not found" | `dbus-x11` not installed or not started | Rebuild the `desktop` container; entrypoint.sh starts dbus-daemon and xstartup uses `dbus-launch` |
@@ -538,7 +636,7 @@ After ingesting, set `onet_enabled = true` in the Settings panel.
 | Memory degraded | PostgreSQL / Dragonfly not reachable | Check `docker compose logs postgres dragonfly`; system falls back gracefully |
 | Agent factory not activating | `agent_factory_enabled` is false | Enable in Settings panel or set `AGENT_FACTORY_ENABLED=true` |
 | Tool patterns not learning | `tool_pattern_memory_enabled` is false | Enable in Settings panel or set `TOOL_PATTERN_MEMORY_ENABLED=true` |
-| LINA not responding | LINA service not healthy | Check `docker compose logs lina`; ensure `ANTHROPIC_API_KEY` is set |
+| LINA not responding | LINA service not healthy | Check `docker compose logs lina`; ensure `ANTHROPIC_API_KEY` is set (LINA always uses Anthropic) |
 
 ---
 
@@ -547,7 +645,10 @@ After ingesting, set `onet_enabled = true` in the Settings panel.
 | Goal | File(s) to edit |
 |---|---|
 | Add a new AI tool | `backend/src/tools/index.ts` — add function, add to `TOOL_DEFINITIONS`, add `case` in `dispatchTool()` |
-| Change AI model or system prompt | `backend/src/api/anthropic.ts` |
+| Add a new AI provider | `backend/src/api/providers/` — implement `AIProvider`, register in `index.ts`, add UI options in `SettingsPanel` |
+| Change AI provider or model at runtime | Settings panel → AI tab (no restart needed) |
+| Change AI provider or model via env | Set `AI_PROVIDER`, `AI_MODEL`, `AI_API_KEY`, `AI_BASE_URL` in `.env` |
+| Change AI system prompt | `backend/src/api/anthropic.ts` (`CORE_SYSTEM_PROMPT`) |
 | Modify LINA's identity or values | `backend/lina/LINA_SOUL.md` (design), `backend/lina/value_engine.py` (polytope), `backend/lina/lina_service.py` (endpoints) |
 | Add or modify a specialized agent | `backend/db/schema.sql` — update the `specialized_agents` INSERT seed |
 | Add a WebSocket event | `backend/src/index.ts` (emit/on) + `frontend/src/hooks/useSocket.ts` (listener) |

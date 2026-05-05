@@ -22,8 +22,10 @@ const ENV_DEFAULTS: Record<string, string> = {
   working_memory_ttl_hours: process.env.WORKING_MEMORY_TTL_HOURS ?? '48',
   max_conversation_history: process.env.MAX_CONVERSATION_HISTORY ?? '100',
   log_level: process.env.LOG_LEVEL ?? 'info',
+  ai_provider: process.env.AI_PROVIDER ?? 'anthropic',
   ai_model: process.env.AI_MODEL ?? 'claude-haiku-4-5-20251001',
   ai_max_tokens: process.env.AI_MAX_TOKENS ?? '4096',
+  ai_base_url: process.env.AI_BASE_URL ?? '',
   dragonfly_max_memory: process.env.DRAGONFLY_MAX_MEMORY ?? '2gb',
 };
 
